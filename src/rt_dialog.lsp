@@ -1,0 +1,240 @@
+;;; ==========================================================================
+;;; src/rt_dialog.lsp - Modal Dialog Initialization, Callbacks & Validation
+;;; ==========================================================================
+
+;; Helper: read currently selected rounding mode from radio buttons
+(defun rt-dlg-get-round-mode ()
+  (cond
+    ((= (get_tile "rnd_up")   "1") "up")
+    ((= (get_tile "rnd_down") "1") "down")
+    (T "nearest")
+  )
+)
+
+;; Helper: read currently selected unit preset from radio buttons
+(defun rt-dlg-get-preset ()
+  (cond
+    ((= (get_tile "p_mm") "1") "mm")
+    ((= (get_tile "p_cm") "1") "cm")
+    ((= (get_tile "p_m")  "1") "m")
+    (T "custom")
+  )
+)
+
+;; Callback: preset radio button clicked
+(defun rt-dlg-on-preset (preset)
+  (cond
+    ((= preset "mm") (set_tile "factor" "1e-6"))
+    ((= preset "cm") (set_tile "factor" "1e-4"))
+    ((= preset "m")  (set_tile "factor" "1"))
+    ((= preset "custom") (mode_tile "factor" 2))
+  )
+  (rt-dlg-update-preview)
+)
+
+;; Callback: factor edit_box modified manually
+(defun rt-dlg-on-factor (/ fStr)
+  (setq fStr (strcase (vl-string-trim " \t" (get_tile "factor")) T))
+  (cond
+    ((or (= fStr "1e-6") (= fStr "0.000001")) (set_tile "p_mm" "1"))
+    ((or (= fStr "1e-4") (= fStr "0.0001"))   (set_tile "p_cm" "1"))
+    ((or (= fStr "1")    (= fStr "1.0"))      (set_tile "p_m"  "1"))
+    (T (set_tile "p_custom" "1"))
+  )
+  (rt-dlg-update-preview)
+)
+
+;; Callback: Chilled Water toggle changed
+(defun rt-dlg-on-chw-toggle (/ enabled)
+  (setq enabled (= (get_tile "chw_en") "1"))
+  (mode_tile "tonfactor" (if enabled 0 1))
+  (rt-dlg-update-preview)
+)
+
+;; Callback: update live label preview inside dialog
+(defun rt-dlg-update-preview (/ rt sn ex prStr pr ml sep biasStr bias rmode
+                                sampleArea chwEn tfStr tf chwGpm)
+  (setq rt      (vl-string-trim " \t" (get_tile "rtype"))
+        sn      (vl-string-trim " \t" (get_tile "startnum"))
+        ex      (get_tile "extra")
+        prStr   (vl-string-trim " \t" (get_tile "prec"))
+        ml      (get_tile "multiline")
+        biasStr (vl-string-trim " \t" (get_tile "bias"))
+        rmode   (rt-dlg-get-round-mode)
+        chwEn   (= (get_tile "chw_en") "1")
+        tfStr   (vl-string-trim " \t" (get_tile "tonfactor"))
+  )
+  (setq pr   (if (rt-valid-uint-p prStr) (min 6 (atoi prStr)) *rt-prec*)
+        bias (if (rt-valid-number-p biasStr) (atof biasStr) 0.0)
+  )
+  (if (= rt "") (setq rt "Room"))
+  (if (= sn "") (setq sn "1"))
+  (setq sep (if (= ml "1") " | " " "))
+
+  ;; Sample scaled area = 24.53 m2 before bias and rounding
+  (setq sampleArea (rt-calc-area 24.53 1.0 bias pr rmode))
+
+  (if (and chwEn (rt-valid-number-p tfStr) (> (atof tfStr) 0.0))
+    (setq tf     (atof tfStr)
+          chwGpm (rt-calc-chw sampleArea tf pr))
+    (setq chwEn  nil
+          chwGpm 0.0)
+  )
+
+  (set_tile "preview"
+    (rt-format-label (strcat rt "#" sn) sampleArea pr ex sep chwEn chwGpm)
+  )
+)
+
+;; Validate all dialog fields and persist to session globals
+(defun rt-dlg-validate-and-save (/ rt snStr htStr fStr bStr prStr tfStr
+                                   sn ht fac bias pr chwEn tf)
+  (set_tile "error" "")
+  (setq rt    (vl-string-trim " \t" (get_tile "rtype"))
+        snStr (vl-string-trim " \t" (get_tile "startnum"))
+        htStr (vl-string-trim " \t" (get_tile "height"))
+        fStr  (vl-string-trim " \t" (get_tile "factor"))
+        bStr  (vl-string-trim " \t" (get_tile "bias"))
+        prStr (vl-string-trim " \t" (get_tile "prec"))
+        chwEn (= (get_tile "chw_en") "1")
+        tfStr (vl-string-trim " \t" (get_tile "tonfactor"))
+  )
+  (cond
+    ((= rt "")
+     (set_tile "error" "Please enter a Room Type.")
+     nil
+    )
+    ((not (rt-valid-uint-p snStr))
+     (set_tile "error" "Start Number must be a non-negative integer.")
+     nil
+    )
+    ((or (not (rt-valid-number-p htStr)) (<= (atof htStr) 0.0))
+     (set_tile "error" "Font Size must be a number greater than 0.")
+     nil
+    )
+    ((or (not (rt-valid-number-p fStr)) (<= (atof fStr) 0.0))
+     (set_tile "error" "Scale Factor must be a number greater than 0 (e.g. 1e-6 or 1e-2).")
+     nil
+    )
+    ((not (rt-valid-number-p bStr))
+     (set_tile "error" "Area Bias must be a valid number (positive, 0, or negative).")
+     nil
+    )
+    ((or (not (rt-valid-uint-p prStr)) (> (atoi prStr) 6))
+     (set_tile "error" "Decimals must be an integer between 0 and 6.")
+     nil
+    )
+    ((and chwEn (or (not (rt-valid-number-p tfStr)) (<= (atof tfStr) 0.0)))
+     (set_tile "error" "Area Ton Factor must be a number greater than 0.")
+     nil
+    )
+    (T
+     (setq sn   (atoi snStr)
+           ht   (atof htStr)
+           fac  (atof fStr)
+           bias (atof bStr)
+           pr   (atoi prStr)
+           tf   (if (and (rt-valid-number-p tfStr) (> (atof tfStr) 0.0))
+                  (atof tfStr)
+                  *rt-ton-factor*)
+     )
+     (setq *rt-rtype*      rt
+           *rt-num*        sn
+           *rt-extra*      (get_tile "extra")
+           *rt-height*     ht
+           *rt-preset*     (rt-dlg-get-preset)
+           *rt-factor*     fac
+           *rt-factor-str* fStr
+           *rt-bias*       bias
+           *rt-round-mode* (rt-dlg-get-round-mode)
+           *rt-prec*       pr
+           *rt-chw-en*     (if chwEn "1" "0")
+           *rt-ton-factor* tf
+           *rt-multiline*  (get_tile "multiline")
+           *rt-keepbndry*  (get_tile "keepbndry")
+     )
+     T
+    )
+  )
+)
+
+;; Show modal dialog (returns: 1 = Pick Rooms, 2 = Export CSV, 0 = Cancel)
+(defun rt-show-dialog (/ dclPath dclId rc)
+  (setq dclPath (strcat *rt-root-dir* "src/rt_dialog.dcl"))
+  (if (not (findfile dclPath))
+    (progn
+      (princ (strcat "\nError: Dialog file not found at: " dclPath))
+      0
+    )
+    (progn
+      (setq dclId (load_dialog dclPath))
+      (if (not (new_dialog "roomtag_dlg" dclId))
+        (progn
+          (if (> dclId 0) (unload_dialog dclId))
+          (princ "\nError: Could not initialize RoomTag dialog.")
+          0
+        )
+        (progn
+          ;; Populate tiles from session state
+          (set_tile "rtype"     *rt-rtype*)
+          (set_tile "startnum"  (itoa (rt-get-count *rt-rtype*)))
+          (set_tile "height"    (rtos *rt-height* 2 2))
+          (set_tile "extra"     *rt-extra*)
+          (set_tile "factor"    *rt-factor-str*)
+          (set_tile "bias"      (rtos *rt-bias* 2 4))
+          (set_tile "prec"      (itoa *rt-prec*))
+          (set_tile "chw_en"    *rt-chw-en*)
+          (set_tile "tonfactor" (rtos *rt-ton-factor* 2 4))
+          (set_tile "multiline" *rt-multiline*)
+          (set_tile "keepbndry" *rt-keepbndry*)
+
+          (cond
+            ((= *rt-preset* "mm") (set_tile "p_mm" "1"))
+            ((= *rt-preset* "cm") (set_tile "p_cm" "1"))
+            ((= *rt-preset* "m")  (set_tile "p_m"  "1"))
+            (T                    (set_tile "p_custom" "1"))
+          )
+          (cond
+            ((= *rt-round-mode* "up")   (set_tile "rnd_up"   "1"))
+            ((= *rt-round-mode* "down") (set_tile "rnd_down" "1"))
+            (T                          (set_tile "rnd_near" "1"))
+          )
+
+          ;; Initial enable/disable state for Chilled Water input
+          (mode_tile "tonfactor" (if (= *rt-chw-en* "1") 0 1))
+          (rt-dlg-update-preview)
+
+          ;; Wire tile callbacks
+          (action_tile "rtype"
+            "(set_tile \"startnum\" (itoa (rt-get-count (vl-string-trim \" \\t\" $value)))) (rt-dlg-update-preview)"
+          )
+          (action_tile "startnum"  "(rt-dlg-update-preview)")
+          (action_tile "extra"     "(rt-dlg-update-preview)")
+          (action_tile "p_mm"      "(rt-dlg-on-preset \"mm\")")
+          (action_tile "p_cm"      "(rt-dlg-on-preset \"cm\")")
+          (action_tile "p_m"       "(rt-dlg-on-preset \"m\")")
+          (action_tile "p_custom"  "(rt-dlg-on-preset \"custom\")")
+          (action_tile "factor"    "(rt-dlg-on-factor)")
+          (action_tile "bias"      "(rt-dlg-update-preview)")
+          (action_tile "rnd_near"  "(rt-dlg-update-preview)")
+          (action_tile "rnd_up"    "(rt-dlg-update-preview)")
+          (action_tile "rnd_down"  "(rt-dlg-update-preview)")
+          (action_tile "prec"      "(rt-dlg-update-preview)")
+          (action_tile "chw_en"    "(rt-dlg-on-chw-toggle)")
+          (action_tile "tonfactor" "(rt-dlg-update-preview)")
+          (action_tile "multiline" "(rt-dlg-update-preview)")
+
+          (action_tile "pick"   "(if (rt-dlg-validate-and-save) (done_dialog 1))")
+          (action_tile "export" "(done_dialog 2)")
+          (action_tile "cancel" "(done_dialog 0)")
+
+          (setq rc (start_dialog))
+          (unload_dialog dclId)
+          rc
+        )
+      )
+    )
+  )
+)
+
+(princ)
