@@ -1,5 +1,5 @@
 ;;; ==========================================================================
-;;; RoomTag.lsp - Entry Point & Module Loader for RoomTag v2 (ZWCAD)
+;;; RoomTag.lsp - Entry Point & Module Loader for RoomTag V1.0 (ZWCAD)
 ;;; Commands: ROOMTAG, ROOMEXPORT
 ;;; ==========================================================================
 
@@ -75,9 +75,10 @@
 ;; --------------------------------------------------------------------------
 ;; COMMAND: ROOMTAG
 ;; --------------------------------------------------------------------------
-(defun c:ROOMTAG (/ *error* oldEcho keepLoop rc pt rawArea areaM2 chwEn chwGpm
-                    roomName sep labelStr statusMsg)
+(defun c:ROOMTAG (/ *error* oldEcho keepLoop rc pt res rawArea areaM2 chwEn chwGpm
+                    roomName sep labelStr statusMsg previewEnt lastMtext)
   (defun *error* (msg)
+    (if previewEnt (rt-clear-preview previewEnt (= *rt-keepbndry* "1")))
     (if oldEcho (setvar "CMDECHO" oldEcho))
     (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
       (princ (strcat "\nError: " msg))
@@ -92,7 +93,10 @@
   (if (not *rt-loaded*)
     (princ "\nRoomTag could not start because required modules failed to load.")
     (progn
-      (setq oldEcho (getvar "CMDECHO"))
+      (setq oldEcho    (getvar "CMDECHO")
+            previewEnt nil
+            lastMtext  nil
+      )
       (setvar "CMDECHO" 0)
       (regapp "ROOMTAG_DATA")
 
@@ -111,30 +115,81 @@
           )
           ;; Pick Rooms
           ((= rc 1)
-           (setq pt T)
+           (setq pt T
+                 lastMtext nil
+           )
            (while pt
-             (initget "Dialog")
-             (setq pt (getpoint (strcat "\nPick inside room for " *rt-rtype* "#" (itoa *rt-num*) " [Dialog] <Done>: ")))
+             (initget "Undo Dialog")
+             (setq pt (getpoint (strcat "\nPick inside room for " *rt-rtype* "#" (itoa *rt-num*) " [Undo/Dialog] <Done>: ")))
              (cond
+               ((= pt "Undo")
+                (if (and lastMtext (entget lastMtext))
+                  (progn
+                    (entdel lastMtext)
+                    (setq lastMtext nil)
+                    (if previewEnt
+                      (progn
+                        (rt-clear-preview previewEnt nil) ; Always delete undone boundary
+                        (setq previewEnt nil)
+                      )
+                    )
+                    (if (> *rt-num* 0)
+                      (setq *rt-num* (1- *rt-num*))
+                    )
+                    (rt-set-count *rt-rtype* (max 0 (1- *rt-num*)))
+                    (princ (strcat "\nUndid last tag. Next room: " *rt-rtype* "#" (itoa *rt-num*)))
+                  )
+                  (princ "\nNothing to undo in this pick session.")
+                )
+               )
                ((= pt "Dialog")
-                (setq pt nil) ; Re-open modal dialog
+                (if previewEnt
+                  (progn
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+                    (setq previewEnt nil)
+                  )
+                )
+                (setq lastMtext nil
+                      pt        nil
+                ) ; Re-open modal dialog
                )
                ((null pt)
+                (if previewEnt
+                  (progn
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+                    (setq previewEnt nil)
+                  )
+                )
                 (setq keepLoop nil) ; Finish command
                )
                ((listp pt)
-                (setq rawArea (rt-get-area-at pt (= *rt-keepbndry* "1")))
-                (if rawArea
+                ;; Clear previous room's preview before detecting next room
+                (if previewEnt
                   (progn
-                    (setq areaM2 (rt-calc-area rawArea *rt-factor* *rt-bias* *rt-prec* *rt-round-mode*))
-                    (setq chwEn  (= *rt-chw-en* "1"))
-                    (setq chwGpm (if chwEn (rt-calc-chw areaM2 *rt-ton-factor* *rt-prec*) 0.0))
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+                    (setq previewEnt nil)
+                  )
+                )
+                (setq res (rt-get-area-at pt))
+                (if res
+                  (progn
+                    (setq rawArea    (car res)
+                          previewEnt (cadr res)
+                    )
+                    ;; Highlight detected boundary polyline as quick preview
+                    (rt-show-preview previewEnt)
+
+                    (setq areaM2   (rt-calc-area rawArea *rt-factor* *rt-bias* *rt-prec* *rt-round-mode*))
+                    (setq chwEn    (= *rt-chw-en* "1"))
+                    (setq chwGpm   (if chwEn (rt-calc-chw areaM2 *rt-ton-factor* *rt-prec*) 0.0))
                     (setq roomName (strcat *rt-rtype* "#" (itoa *rt-num*)))
                     (setq sep      (if (= *rt-multiline* "1") "\\P" " "))
                     (setq labelStr (rt-format-label roomName areaM2 *rt-prec* *rt-extra* sep chwEn chwGpm))
 
-                    (rt-create-room-mtext
-                      pt *rt-height* labelStr roomName *rt-rtype* areaM2 chwEn chwGpm *rt-ton-factor*
+                    (setq lastMtext
+                      (rt-create-room-mtext
+                        pt *rt-height* labelStr roomName *rt-rtype* areaM2 chwEn chwGpm *rt-ton-factor*
+                      )
                     )
 
                     (setq statusMsg (strcat "\nPlaced: " roomName " -> " (rtos areaM2 2 *rt-prec*) " m2"))
@@ -155,6 +210,9 @@
         )
       )
 
+      (if previewEnt
+        (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+      )
       (setvar "CMDECHO" oldEcho)
     )
   )
@@ -176,6 +234,6 @@
 )
 
 (if *rt-loaded*
-  (princ "\nRoomTag v2 loaded. Commands: ROOMTAG, ROOMEXPORT\n")
+  (princ "\nRoomTag V1.0 loaded. Commands: ROOMTAG, ROOMEXPORT\n")
 )
 (princ)
