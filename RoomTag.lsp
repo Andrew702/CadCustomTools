@@ -1,5 +1,5 @@
 ;;; ==========================================================================
-;;; RoomTag.lsp - Entry Point & Module Loader for RoomTag V1.0 (ZWCAD)
+;;; RoomTag.lsp - Entry Point & Module Loader for RoomTag V1.1 (ZWCAD)
 ;;; Commands: ROOMTAG, ROOMEXPORT
 ;;; ==========================================================================
 
@@ -235,6 +235,6 @@
 )
 
 (if *rt-loaded*
-  (princ "\nRoomTag V1.0 loaded. Commands: ROOMTAG, ROOMEXPORT\n")
+  (princ "\nRoomTag V1.1 loaded. Commands: ROOMTAG, ROOMEXPORT\n")
 )
 (princ)
