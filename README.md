@@ -20,7 +20,7 @@ Modal-dialog room area tagger (Xref-compatible) with area scaling, bias, roundin
 
 ## Commands
 
-- `ROOMTAG` — Opens the modal dialog, lets you pick rooms sequentially, highlights the detected boundary polyline in bright green as a quick preview (auto-cleared on the next pick or exit), and places `MTEXT` tags with attached XDATA. Type `U` to undo the last placed tag if a boundary leaks, or `D` to return to the dialog.
+- `ROOMTAG` — Opens the modal dialog, lets you choose target layers for both the `MTEXT` and (optionally) a persistent **Area Polyline**, highlights each detected boundary in bright green as a quick preview, and places `MTEXT` tags with attached XDATA. Type `U` to undo the last placed tag if a boundary leaks, or `D` to return to the dialog.
 - `ROOMEXPORT` — Directly exports selected (or all) room tags in the drawing to a `.csv` file ready for Excel.
 
 ## Calculation Pipeline

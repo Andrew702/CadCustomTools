@@ -84,9 +84,30 @@ roomtag_dlg : dialog {
     }
   }
 
-  : row {
-    : toggle { key = "multiline"; label = "Multi-line MTEXT"; }
-    : toggle { key = "keepbndry"; label = "Keep Boundary"; }
+  : boxed_column {
+    label = "Output & Layers";
+    : row {
+      : popup_list {
+        key = "mtext_layer";
+        label = "MTEXT Layer:";
+        edit_width = 22;
+      }
+      : toggle {
+        key = "multiline";
+        label = "Multi-line MTEXT";
+      }
+    }
+    : row {
+      : toggle {
+        key = "keepbndry";
+        label = "Keep Area Polyline";
+      }
+      : popup_list {
+        key = "bndry_layer";
+        label = "Polyline Layer:";
+        edit_width = 22;
+      }
+    }
   }
 
   : boxed_column {

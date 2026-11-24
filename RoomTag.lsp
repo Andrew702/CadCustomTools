@@ -50,8 +50,8 @@
     (progn
       (setq modules '("src/rt_state.lsp"
                       "src/rt_math.lsp"
-                      "src/rt_dialog.lsp"
                       "src/rt_cad.lsp"
+                      "src/rt_dialog.lsp"
                       "src/rt_export.lsp")
             ok      T
       )
@@ -78,7 +78,7 @@
 (defun c:ROOMTAG (/ *error* oldEcho keepLoop rc pt res rawArea areaM2 chwEn chwGpm
                     roomName sep labelStr statusMsg previewEnt lastMtext)
   (defun *error* (msg)
-    (if previewEnt (rt-clear-preview previewEnt (= *rt-keepbndry* "1")))
+    (if previewEnt (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*))
     (if oldEcho (setvar "CMDECHO" oldEcho))
     (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
       (princ (strcat "\nError: " msg))
@@ -129,7 +129,7 @@
                     (setq lastMtext nil)
                     (if previewEnt
                       (progn
-                        (rt-clear-preview previewEnt nil) ; Always delete undone boundary
+                        (rt-clear-preview previewEnt nil nil) ; Always delete undone boundary
                         (setq previewEnt nil)
                       )
                     )
@@ -145,7 +145,7 @@
                ((= pt "Dialog")
                 (if previewEnt
                   (progn
-                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
                     (setq previewEnt nil)
                   )
                 )
@@ -156,17 +156,17 @@
                ((null pt)
                 (if previewEnt
                   (progn
-                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
                     (setq previewEnt nil)
                   )
                 )
                 (setq keepLoop nil) ; Finish command
                )
                ((listp pt)
-                ;; Clear previous room's preview before detecting next room
+                ;; Finalize/clear previous room's preview before detecting next room
                 (if previewEnt
                   (progn
-                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
                     (setq previewEnt nil)
                   )
                 )
@@ -188,7 +188,8 @@
 
                     (setq lastMtext
                       (rt-create-room-mtext
-                        pt *rt-height* labelStr roomName *rt-rtype* areaM2 chwEn chwGpm *rt-ton-factor*
+                        pt *rt-height* labelStr roomName *rt-rtype* areaM2
+                        chwEn chwGpm *rt-ton-factor* *rt-mtext-layer*
                       )
                     )
 
@@ -211,7 +212,7 @@
       )
 
       (if previewEnt
-        (rt-clear-preview previewEnt (= *rt-keepbndry* "1"))
+        (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
       )
       (setvar "CMDECHO" oldEcho)
     )

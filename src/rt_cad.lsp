@@ -1,6 +1,32 @@
 ;;; ==========================================================================
-;;; src/rt_cad.lsp - ZWCAD Boundary Detection, Polyline Preview & MTEXT/XDATA
+;;; src/rt_cad.lsp - ZWCAD Layers, Boundary Preview & MTEXT/XDATA Creation
 ;;; ==========================================================================
+
+;; Return sorted list of local drawing layer names (excludes Xref "|" layers),
+;; prefixed with "<Current>" so the user can always follow CLAYER.
+(defun rt-get-local-layers (/ lay name names)
+  (setq lay (tblnext "LAYER" T))
+  (while lay
+    (setq name (cdr (assoc 2 lay)))
+    (if (and name (not (vl-string-search "|" name)))
+      (setq names (cons name names))
+    )
+    (setq lay (tblnext "LAYER"))
+  )
+  (cons "<Current>" (vl-sort names '(lambda (a b) (< (strcase a) (strcase b)))))
+)
+
+;; Resolve a layer choice ("<Current>" or explicit name) to an actual layer name
+;; (returns nil if "<Current>" or if the layer does not exist in this drawing).
+(defun rt-resolve-layer (layerChoice)
+  (if (and layerChoice
+           (/= layerChoice "")
+           (/= layerChoice "<Current>")
+           (tblsearch "LAYER" layerChoice))
+    layerChoice
+    nil
+  )
+)
 
 ;; Detect closed boundary at picked point (Xref-compatible).
 ;; Deletes any inner island boundaries and returns (list maxArea maxEnt),
@@ -55,13 +81,19 @@
   )
 )
 
-;; Clear the preview polyline: delete it unless keepBoundary is non-nil
-;; (when kept, restore ByLayer color and remove highlight).
-(defun rt-clear-preview (ent keepBoundary / obj)
+;; Clear the preview polyline: delete it unless keepBoundary is non-nil.
+;; When kept as a persistent area object, assign targetLayer (if specified),
+;; restore ByLayer color, and remove the temporary highlight.
+(defun rt-clear-preview (ent keepBoundary bndryLayer / obj resolvedLayer)
   (if (and ent (entget ent))
     (if keepBoundary
       (progn
-        (setq obj (vlax-ename->vla-object ent))
+        (setq obj           (vlax-ename->vla-object ent)
+              resolvedLayer (rt-resolve-layer bndryLayer)
+        )
+        (if resolvedLayer
+          (vl-catch-all-apply 'vla-put-Layer (list obj resolvedLayer))
+        )
         (vl-catch-all-apply 'vla-put-Color (list obj 256)) ; ByLayer
         (vl-catch-all-apply 'vla-Update (list obj))
         (redraw ent 4) ; Unhighlight
@@ -72,6 +104,7 @@
 )
 
 ;; Create centered MTEXT entity with ROOMTAG_DATA XDATA attached.
+;; Places MTEXT on mtextLayer if specified (else current CLAYER).
 ;; Returns the new MTEXT entity name (ename) or nil on failure.
 ;; XDATA layout (backward-compatible with v1 3-item tags):
 ;;   0: (1000 . roomName)   - e.g. "Cafe#1"
@@ -80,13 +113,22 @@
 ;;   3: (1070 . chwFlag)    - 1 if CHW enabled, 0 if disabled
 ;;   4: (1040 . chwGpm)     - CHW flow in gpm (0.0 if disabled)
 ;;   5: (1040 . tonFactor)  - Area Ton Factor used (0.0 if disabled)
-(defun rt-create-room-mtext (pt height labelStr roomName rtype areaM2 chwEnabled chwGpm tonFactor)
+(defun rt-create-room-mtext (pt height labelStr roomName rtype areaM2
+                             chwEnabled chwGpm tonFactor mtextLayer
+                             / resolvedLayer dxf)
   (regapp "ROOMTAG_DATA")
-  (if
-    (entmake
+  (setq resolvedLayer (rt-resolve-layer mtextLayer))
+  (setq dxf
+    (append
       (list
         '(0 . "MTEXT")
         '(100 . "AcDbEntity")
+      )
+      (if resolvedLayer
+        (list (cons 8 resolvedLayer))
+        nil
+      )
+      (list
         '(100 . "AcDbMText")
         (cons 10 (trans pt 1 0))
         (cons 40 (float height))
@@ -104,6 +146,8 @@
         )
       )
     )
+  )
+  (if (entmake dxf)
     (entlast)
     nil
   )

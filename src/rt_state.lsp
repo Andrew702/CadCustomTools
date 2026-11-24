@@ -21,9 +21,11 @@
 (if (not *rt-chw-en*)     (setq *rt-chw-en*     "0"))       ; "1" = Enabled, "0" = Disabled
 (if (not *rt-ton-factor*) (setq *rt-ton-factor* 15.0))      ; Area Ton Factor (m2/ton)
 
-;; Output options
-(if (not *rt-multiline*)  (setq *rt-multiline*  "0"))       ; "1" = Multi-line, "0" = Single-line
-(if (not *rt-keepbndry*)  (setq *rt-keepbndry*  "0"))       ; "1" = Keep outer boundary, "0" = Delete
+;; Output & layer options
+(if (not *rt-multiline*)   (setq *rt-multiline*   "0"))          ; "1" = Multi-line, "0" = Single-line
+(if (not *rt-keepbndry*)   (setq *rt-keepbndry*   "0"))          ; "1" = Keep area polyline, "0" = Delete
+(if (not *rt-mtext-layer*) (setq *rt-mtext-layer* "<Current>"))  ; Target layer for MTEXT
+(if (not *rt-bndry-layer*) (setq *rt-bndry-layer* "<Current>"))  ; Target layer for persistent area polyline
 
 ;; --------------------------------------------------------------------------
 ;; Counter Helpers (per room type, case-insensitive)

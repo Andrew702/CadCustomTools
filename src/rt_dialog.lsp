@@ -2,6 +2,30 @@
 ;;; src/rt_dialog.lsp - Modal Dialog Initialization, Callbacks & Validation
 ;;; ==========================================================================
 
+;; Helper: find 0-based index of item in string list (case-insensitive), default 0
+(defun rt-dlg-list-index (target lst / idx found targetUp)
+  (setq idx      0
+        found    nil
+        targetUp (strcase target)
+  )
+  (while (and lst (not found))
+    (if (= (strcase (car lst)) targetUp)
+      (setq found idx)
+      (setq idx (1+ idx)
+            lst (cdr lst)
+      )
+    )
+  )
+  (if found found 0)
+)
+
+;; Helper: populate a DCL popup_list tile with a list of strings
+(defun rt-dlg-fill-list (key items)
+  (start_list key)
+  (mapcar 'add_list items)
+  (end_list)
+)
+
 ;; Helper: read currently selected rounding mode from radio buttons
 (defun rt-dlg-get-round-mode ()
   (cond
@@ -51,6 +75,11 @@
   (rt-dlg-update-preview)
 )
 
+;; Callback: Keep Area Polyline toggle changed
+(defun rt-dlg-on-keepbndry-toggle ()
+  (mode_tile "bndry_layer" (if (= (get_tile "keepbndry") "1") 0 1))
+)
+
 ;; Callback: update live label preview inside dialog
 (defun rt-dlg-update-preview (/ rt sn ex prStr pr ml sep biasStr bias rmode
                                 sampleArea chwEn tfStr tf chwGpm)
@@ -88,7 +117,7 @@
 
 ;; Validate all dialog fields and persist to session globals
 (defun rt-dlg-validate-and-save (/ rt snStr htStr fStr bStr prStr tfStr
-                                   sn ht fac bias pr chwEn tf)
+                                   sn ht fac bias pr chwEn tf mIdx bIdx)
   (set_tile "error" "")
   (setq rt    (vl-string-trim " \t" (get_tile "rtype"))
         snStr (vl-string-trim " \t" (get_tile "startnum"))
@@ -137,21 +166,29 @@
            tf   (if (and (rt-valid-number-p tfStr) (> (atof tfStr) 0.0))
                   (atof tfStr)
                   *rt-ton-factor*)
+           mIdx (atoi (get_tile "mtext_layer"))
+           bIdx (atoi (get_tile "bndry_layer"))
      )
-     (setq *rt-rtype*      rt
-           *rt-num*        sn
-           *rt-extra*      (get_tile "extra")
-           *rt-height*     ht
-           *rt-preset*     (rt-dlg-get-preset)
-           *rt-factor*     fac
-           *rt-factor-str* fStr
-           *rt-bias*       bias
-           *rt-round-mode* (rt-dlg-get-round-mode)
-           *rt-prec*       pr
-           *rt-chw-en*     (if chwEn "1" "0")
-           *rt-ton-factor* tf
-           *rt-multiline*  (get_tile "multiline")
-           *rt-keepbndry*  (get_tile "keepbndry")
+     (setq *rt-rtype*       rt
+           *rt-num*         sn
+           *rt-extra*       (get_tile "extra")
+           *rt-height*      ht
+           *rt-preset*      (rt-dlg-get-preset)
+           *rt-factor*      fac
+           *rt-factor-str*  fStr
+           *rt-bias*        bias
+           *rt-round-mode*  (rt-dlg-get-round-mode)
+           *rt-prec*        pr
+           *rt-chw-en*      (if chwEn "1" "0")
+           *rt-ton-factor*  tf
+           *rt-multiline*   (get_tile "multiline")
+           *rt-keepbndry*   (get_tile "keepbndry")
+           *rt-mtext-layer* (if (and *rt-dlg-layers* (< mIdx (length *rt-dlg-layers*)))
+                              (nth mIdx *rt-dlg-layers*)
+                              "<Current>")
+           *rt-bndry-layer* (if (and *rt-dlg-layers* (< bIdx (length *rt-dlg-layers*)))
+                              (nth bIdx *rt-dlg-layers*)
+                              "<Current>")
      )
      T
     )
@@ -175,18 +212,25 @@
           0
         )
         (progn
+          ;; Build local layer list (excluding Xref layers)
+          (setq *rt-dlg-layers* (rt-get-local-layers))
+          (rt-dlg-fill-list "mtext_layer" *rt-dlg-layers*)
+          (rt-dlg-fill-list "bndry_layer" *rt-dlg-layers*)
+
           ;; Populate tiles from session state
-          (set_tile "rtype"     *rt-rtype*)
-          (set_tile "startnum"  (itoa (rt-get-count *rt-rtype*)))
-          (set_tile "height"    (rtos *rt-height* 2 2))
-          (set_tile "extra"     *rt-extra*)
-          (set_tile "factor"    *rt-factor-str*)
-          (set_tile "bias"      (rtos *rt-bias* 2 4))
-          (set_tile "prec"      (itoa *rt-prec*))
-          (set_tile "chw_en"    *rt-chw-en*)
-          (set_tile "tonfactor" (rtos *rt-ton-factor* 2 4))
-          (set_tile "multiline" *rt-multiline*)
-          (set_tile "keepbndry" *rt-keepbndry*)
+          (set_tile "rtype"       *rt-rtype*)
+          (set_tile "startnum"    (itoa (rt-get-count *rt-rtype*)))
+          (set_tile "height"      (rtos *rt-height* 2 2))
+          (set_tile "extra"       *rt-extra*)
+          (set_tile "factor"      *rt-factor-str*)
+          (set_tile "bias"        (rtos *rt-bias* 2 4))
+          (set_tile "prec"        (itoa *rt-prec*))
+          (set_tile "chw_en"      *rt-chw-en*)
+          (set_tile "tonfactor"   (rtos *rt-ton-factor* 2 4))
+          (set_tile "multiline"   *rt-multiline*)
+          (set_tile "keepbndry"   *rt-keepbndry*)
+          (set_tile "mtext_layer" (itoa (rt-dlg-list-index *rt-mtext-layer* *rt-dlg-layers*)))
+          (set_tile "bndry_layer" (itoa (rt-dlg-list-index *rt-bndry-layer* *rt-dlg-layers*)))
 
           (cond
             ((= *rt-preset* "mm") (set_tile "p_mm" "1"))
@@ -200,8 +244,9 @@
             (T                          (set_tile "rnd_near" "1"))
           )
 
-          ;; Initial enable/disable state for Chilled Water input
-          (mode_tile "tonfactor" (if (= *rt-chw-en* "1") 0 1))
+          ;; Initial enable/disable states
+          (mode_tile "tonfactor"   (if (= *rt-chw-en* "1") 0 1))
+          (mode_tile "bndry_layer" (if (= *rt-keepbndry* "1") 0 1))
           (rt-dlg-update-preview)
 
           ;; Wire tile callbacks
@@ -223,6 +268,7 @@
           (action_tile "chw_en"    "(rt-dlg-on-chw-toggle)")
           (action_tile "tonfactor" "(rt-dlg-update-preview)")
           (action_tile "multiline" "(rt-dlg-update-preview)")
+          (action_tile "keepbndry" "(rt-dlg-on-keepbndry-toggle)")
 
           (action_tile "pick"   "(if (rt-dlg-validate-and-save) (done_dialog 1))")
           (action_tile "export" "(done_dialog 2)")
