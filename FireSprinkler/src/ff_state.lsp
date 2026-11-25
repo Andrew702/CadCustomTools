@@ -25,6 +25,7 @@
 ;; Output & layer options
 (if (not *ff-multiline*)   (setq *ff-multiline*   "0"))          ; "1" = Multi-line, "0" = Single-line
 (if (not *ff-keepbndry*)   (setq *ff-keepbndry*   "0"))          ; "1" = Keep area polyline, "0" = Delete
+(if (not *ff-fast-bndry*)  (setq *ff-fast-bndry*  "0"))          ; "1" = Skip island detection in -boundary
 (if (not *ff-mtext-layer*) (setq *ff-mtext-layer* "<Current>"))  ; Target layer for MTEXT
 (if (not *ff-bndry-layer*) (setq *ff-bndry-layer* "<Current>"))  ; Target layer for persistent area polyline
 
