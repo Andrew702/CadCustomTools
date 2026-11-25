@@ -106,18 +106,22 @@
 ;; Create centered MTEXT entity with ROOMTAG_DATA XDATA attached.
 ;; Places MTEXT on mtextLayer if specified (else current CLAYER).
 ;; Returns the new MTEXT entity name (ename) or nil on failure.
-;; XDATA layout (backward-compatible with v1 3-item tags):
+;; XDATA layout (backward-compatible with v1 3-item and v1.1 6-item tags):
 ;;   0: (1000 . roomName)   - e.g. "Cafe#1"
 ;;   1: (1000 . rtype)      - e.g. "Cafe"
 ;;   2: (1040 . areaM2)     - final adjusted & rounded area (m2)
 ;;   3: (1070 . chwFlag)    - 1 if CHW enabled, 0 if disabled
 ;;   4: (1040 . chwGpm)     - CHW flow in gpm (0.0 if disabled)
 ;;   5: (1040 . tonFactor)  - Area Ton Factor used (0.0 if disabled)
+;;   6: (1070 . pipeFlag)   - 1 if pipe sizing enabled, 0 if disabled
+;;   7: (1000 . pipeSize)   - e.g. "25mm" or "1\"" ("" if disabled)
 (defun rt-create-room-mtext (pt height labelStr roomName rtype areaM2
-                             chwEnabled chwGpm tonFactor mtextLayer
-                             / resolvedLayer dxf)
+                             chwEnabled chwGpm tonFactor pipeStr mtextLayer
+                             / resolvedLayer hasPipe dxf)
   (regapp "ROOMTAG_DATA")
-  (setq resolvedLayer (rt-resolve-layer mtextLayer))
+  (setq resolvedLayer (rt-resolve-layer mtextLayer)
+        hasPipe       (and chwEnabled pipeStr (/= pipeStr ""))
+  )
   (setq dxf
     (append
       (list
@@ -142,6 +146,8 @@
             (cons 1070 (if chwEnabled 1 0))
             (cons 1040 (if chwEnabled (float chwGpm) 0.0))
             (cons 1040 (if chwEnabled (float tonFactor) 0.0))
+            (cons 1070 (if hasPipe 1 0))
+            (cons 1000 (if hasPipe pipeStr ""))
           )
         )
       )
