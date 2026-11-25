@@ -5,7 +5,9 @@
 ;; Persistent session preference: "0" = Object Types only, "1" = Break down by Layer
 (if (not *sf-by-layer*) (setq *sf-by-layer* "0"))
 
-;; Escape backslash and double-quote characters for safe DCL string literals.
+;; Escape backslash, double-quote, and ampersand characters for safe DCL literals.
+;; In DCL, a single '&' underlines the next character as a mnemonic, so literal
+;; ampersands in labels/layer names must be doubled as '&&'.
 (defun sf-dcl-escape (str / i len ch out)
   (setq i   1
         len (strlen str)
@@ -16,6 +18,7 @@
     (cond
       ((= ch "\\") (setq out (strcat out "\\\\")))
       ((= ch "\"") (setq out (strcat out "\\\"")))
+      ((= ch "&")  (setq out (strcat out "&&")))
       (T           (setq out (strcat out ch)))
     )
     (setq i (1+ i))
@@ -33,56 +36,92 @@
 
 ;; Generate a temporary .dcl file for either compact Object Types mode or
 ;; expanded Object Types + indented Layer sub-options mode.
+;; Uses fixed_width/alignment=left for crisp indentation, fixed_height/alignment=top
+;; to prevent vertical stretching, and balanced multi-column distribution.
 ;; Returns the temp file path, or nil on failure.
-(defun sf-write-temp-dcl (groups byLayer / dclPath fh maxRows rowCount idx j
-                                           g label cnt lGroups lg lLabel lCnt boxLabel)
+(defun sf-write-temp-dcl (groups byLayer / dclPath fh totalRows maxPerCol numCols
+                                           targetRows rowCount colIdx idx j g label
+                                           cnt lGroups grpRows lg lLabel lCnt boxLabel)
   (sf-cleanup-temp-dcl)
   (setq dclPath (vl-filename-mktemp "sf_dlg_" nil ".dcl"))
   (if (or (null dclPath) (null (setq fh (open dclPath "w"))))
     nil
     (progn
-      (setq *sf-temp-dcl* dclPath
-            maxRows       (if (= byLayer "1") 18 14)
-            rowCount      0
-            idx           0
-            boxLabel      (if (= byLayer "1") "Object Types & Layers" "Object Types")
+      ;; Compute balanced column count and target rows per column
+      (setq totalRows 0)
+      (foreach g groups
+        (setq totalRows
+          (+ totalRows (if (= byLayer "1") (1+ (length (caddr g))) 1))
+        )
       )
+      (if (< totalRows 1) (setq totalRows 1))
+      (setq *sf-temp-dcl* dclPath
+            maxPerCol     (if (= byLayer "1") 17 14)
+            numCols       (1+ (/ (1- totalRows) maxPerCol))
+            targetRows    (1+ (/ (1- totalRows) numCols))
+            rowCount      0
+            colIdx        0
+            idx           0
+            boxLabel      (if (= byLayer "1") "Object Types && Layers" "Object Types")
+      )
+
       (write-line "smartfilter_dlg : dialog {" fh)
       (write-line "  label = \"Smart Selection Filter\";" fh)
 
       ;; Top option row: toggle layer sub-options
       (write-line "  : row {" fh)
-      (write-line "    : toggle { key = \"chk_layer\"; label = \"Break down by &Layer\"; }" fh)
+      (write-line "    fixed_width = true;" fh)
+      (write-line "    alignment = left;" fh)
+      (write-line "    : toggle { key = \"chk_layer\"; label = \"Break down by &Layer\"; fixed_width = true; alignment = left; }" fh)
       (write-line "  }" fh)
 
+      ;; Main content row: boxed checkboxes on left, stacked actions on top-right
       (write-line "  : row {" fh)
       (write-line "    : boxed_row {" fh)
       (write-line (strcat "      label = \"" boxLabel "\";") fh)
       (write-line "      : column {" fh)
+      (write-line "        fixed_height = true;" fh)
+      (write-line "        alignment = top;" fh)
 
       (foreach g groups
         (setq label   (sf-dcl-escape (car g))
               cnt     (cadr g)
               lGroups (caddr g)
+              grpRows (if (= byLayer "1") (1+ (length lGroups)) 1)
         )
-        ;; Start a new column when current column is full (avoid orphaned type header)
+        ;; Start a new balanced column when current column reaches target height,
+        ;; avoiding an orphaned parent header at the bottom of a column.
         (if (and (> rowCount 0)
-                 (or (>= rowCount maxRows)
-                     (and (= byLayer "1") (>= (+ rowCount 2) maxRows))
+                 (< colIdx (1- numCols))
+                 (or (>= rowCount targetRows)
+                     (and (= byLayer "1")
+                          (>= (+ rowCount 2) targetRows)
+                          (> (+ rowCount grpRows) (+ targetRows 2))
+                     )
                  )
             )
           (progn
-            (write-line "        : spacer { height = 0; }" fh)
             (write-line "      }" fh)
+            (write-line "      : spacer { width = 2; fixed_width = true; }" fh)
             (write-line "      : column {" fh)
-            (setq rowCount 0)
+            (write-line "        fixed_height = true;" fh)
+            (write-line "        alignment = top;" fh)
+            (setq rowCount 0
+                  colIdx   (1+ colIdx)
+            )
           )
         )
 
-        ;; Object type checkbox
+        ;; Subtle visual gap between object-type groups in layer mode
+        (if (and (= byLayer "1") (> rowCount 0))
+          (write-line "        : spacer { height = 0.35; fixed_height = true; }" fh)
+        )
+
+        ;; Parent object type checkbox (flush-left)
         (write-line
           (strcat "        : toggle { key = \"t_" (itoa idx)
-                  "\"; label = \"" label " (" (itoa cnt) ")\"; }"
+                  "\"; label = \"" label " (" (itoa cnt)
+                  ")\"; fixed_width = true; alignment = left; }"
           )
           fh
         )
@@ -93,22 +132,29 @@
           (progn
             (setq j 0)
             (foreach lg lGroups
-              (if (>= rowCount maxRows)
+              (if (and (>= rowCount maxPerCol) (< colIdx (1- numCols)))
                 (progn
-                  (write-line "        : spacer { height = 0; }" fh)
                   (write-line "      }" fh)
+                  (write-line "      : spacer { width = 2; fixed_width = true; }" fh)
                   (write-line "      : column {" fh)
-                  (setq rowCount 0)
+                  (write-line "        fixed_height = true;" fh)
+                  (write-line "        alignment = top;" fh)
+                  (setq rowCount 0
+                        colIdx   (1+ colIdx)
+                  )
                 )
               )
               (setq lLabel (sf-dcl-escape (car lg))
                     lCnt   (cadr lg)
               )
               (write-line "        : row {" fh)
-              (write-line "          : spacer { width = 2; fixed_width = true; }" fh)
+              (write-line "          fixed_width = true;" fh)
+              (write-line "          alignment = left;" fh)
+              (write-line "          : spacer { width = 3; fixed_width = true; }" fh)
               (write-line
                 (strcat "          : toggle { key = \"l_" (itoa idx) "_" (itoa j)
-                        "\"; label = \"" lLabel " (" (itoa lCnt) ")\"; }"
+                        "\"; label = \"" lLabel " (" (itoa lCnt)
+                        ")\"; fixed_width = true; alignment = left; }"
                 )
                 fh
               )
@@ -122,33 +168,34 @@
         (setq idx (1+ idx))
       )
 
-      (write-line "        : spacer { height = 0; }" fh)
       (write-line "      }" fh)
       (write-line "    }" fh)
 
-      ;; Right-hand action buttons (Revit Filter layout)
+      ;; Right-hand action buttons pinned tightly at top-right (Revit Filter layout)
       (write-line "    : column {" fh)
       (write-line "      fixed_width = true;" fh)
+      (write-line "      fixed_height = true;" fh)
+      (write-line "      alignment = top;" fh)
       (write-line "      : button { key = \"btn_all\";  label = \"&Check All\";  width = 14; fixed_width = true; }" fh)
       (write-line "      : button { key = \"btn_none\"; label = \"Check &None\"; width = 14; fixed_width = true; }" fh)
       (write-line "      : button { key = \"btn_inv\";  label = \"&Invert\";     width = 14; fixed_width = true; }" fh)
-      (write-line "      : spacer { height = 1; }" fh)
       (write-line "    }" fh)
       (write-line "  }" fh)
 
-      ;; Live selection count footer
-      (write-line "  : text {" fh)
-      (write-line "    key = \"status_txt\";" fh)
-      (write-line "    width = 52;" fh)
-      (write-line "    label = \"\";" fh)
-      (write-line "  }" fh)
-
-      ;; OK / Cancel buttons
+      ;; Unified bottom footer: live status on left, OK / Cancel on right
+      (write-line "  : spacer { height = 0.25; fixed_height = true; }" fh)
       (write-line "  : row {" fh)
-      (write-line "    fixed_width = true;" fh)
-      (write-line "    alignment = centered;" fh)
-      (write-line "    : button { key = \"accept\"; label = \"OK\";     is_default = true; width = 12; fixed_width = true; }" fh)
-      (write-line "    : button { key = \"cancel\"; label = \"Cancel\"; is_cancel  = true; width = 12; fixed_width = true; }" fh)
+      (write-line "    : text {" fh)
+      (write-line "      key = \"status_txt\";" fh)
+      (write-line "      width = 44;" fh)
+      (write-line "      alignment = left;" fh)
+      (write-line "    }" fh)
+      (write-line "    : row {" fh)
+      (write-line "      fixed_width = true;" fh)
+      (write-line "      alignment = right;" fh)
+      (write-line "      : button { key = \"accept\"; label = \"OK\";     is_default = true; width = 11; fixed_width = true; }" fh)
+      (write-line "      : button { key = \"cancel\"; label = \"Cancel\"; is_cancel  = true; width = 11; fixed_width = true; }" fh)
+      (write-line "    }" fh)
       (write-line "  }" fh)
       (write-line "}" fh)
 
