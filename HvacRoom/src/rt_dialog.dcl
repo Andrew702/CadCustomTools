@@ -126,6 +126,10 @@ roomtag_dlg : dialog {
         edit_width = 22;
       }
     }
+    : toggle {
+      key = "fastbndry";
+      label = "Fast Boundary (Skip Islands - click near wall)";
+    }
   }
 
   : boxed_column {
