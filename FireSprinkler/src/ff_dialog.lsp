@@ -210,6 +210,7 @@
            *ff-cov-str*     covStr
            *ff-multiline*   (get_tile "multiline")
            *ff-keepbndry*   (get_tile "keepbndry")
+           *ff-fast-bndry*  (get_tile "fastbndry")
            *ff-mtext-layer* (if (and *ff-dlg-layers* (< mIdx (length *ff-dlg-layers*)))
                               (nth mIdx *ff-dlg-layers*)
                               "<Current>")
@@ -255,6 +256,7 @@
           (set_tile "cov_area"    *ff-cov-str*)
           (set_tile "multiline"   *ff-multiline*)
           (set_tile "keepbndry"   *ff-keepbndry*)
+          (set_tile "fastbndry"   *ff-fast-bndry*)
           (set_tile "mtext_layer" (itoa (ff-dlg-list-index *ff-mtext-layer* *ff-dlg-layers*)))
           (set_tile "bndry_layer" (itoa (ff-dlg-list-index *ff-bndry-layer* *ff-dlg-layers*)))
 
