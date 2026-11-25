@@ -1,8 +1,8 @@
 ;;; ==========================================================================
-;;; src/rt_export.lsp - Excel-Compatible CSV Export with Optional CHW Column
+;;; src/rt_export.lsp - Excel-Compatible CSV Export (Area, CHW Flow, Pipe Size)
 ;;; ==========================================================================
 
-;; Escape CSV field per RFC-4180
+;; Escape CSV field per RFC-4180 (handles commas and inch quotes like 1")
 (defun rt-csv-escape (str)
   (if (or (vl-string-search "," str) (vl-string-search "\"" str))
     (strcat "\"" (vl-string-subst "\"\"" "\"" str) "\"")
@@ -11,9 +11,9 @@
 )
 
 ;; Parse a single MTEXT entity's ROOMTAG_DATA XDATA into a row list:
-;;   (roomName rtype areaM2 chwEnabled chwGpm)
-;; Backward-compatible with v1 tags that only stored 3 XDATA items.
-(defun rt-parse-xdata (xd / name rtype area chwEn chwGpm)
+;;   (roomName rtype areaM2 chwEnabled chwGpm pipeEnabled pipeSize)
+;; Backward-compatible with v1 (3-item) and v1.1 (6-item) tags.
+(defun rt-parse-xdata (xd / name rtype area chwEn chwGpm pipeEn pipeSize)
   (if (and xd (>= (length xd) 3))
     (progn
       (setq name  (cdr (nth 0 xd))
@@ -28,7 +28,15 @@
               chwGpm 0.0
         )
       )
-      (list name rtype area chwEn chwGpm)
+      (if (>= (length xd) 8)
+        (setq pipeEn   (= (cdr (nth 6 xd)) 1)
+              pipeSize (cdr (nth 7 xd))
+        )
+        (setq pipeEn   nil
+              pipeSize ""
+        )
+      )
+      (list name rtype area chwEn chwGpm pipeEn pipeSize)
     )
     nil
   )
@@ -69,18 +77,19 @@
 )
 
 ;; Export tagged rooms to Excel-compatible CSV
-(defun rt-do-export (/ ss i e edata xd row rows hasChw csvPath fp rowIdx line)
+(defun rt-do-export (/ ss i e edata xd row rows hasChw hasPipe csvPath fp rowIdx line)
   (princ "\nSelect room tags to export (or press Enter to export ALL): ")
   (setq ss (ssget '((0 . "MTEXT") (-3 ("ROOMTAG_DATA")))))
   (if (null ss)
     (setq ss (ssget "_X" '((0 . "MTEXT") (-3 ("ROOMTAG_DATA")))))
   )
   (if (null ss)
-    (princ "\nNo ROOMTAG labels found in the drawing.")
+    (princ "\nNo HVACROOM labels found in the drawing.")
     (progn
-      (setq rows   nil
-            hasChw (= *rt-chw-en* "1")
-            i      0
+      (setq rows    nil
+            hasChw  (= *rt-chw-en* "1")
+            hasPipe (and (= *rt-chw-en* "1") (= *rt-pipe-en* "1"))
+            i       0
       )
       (repeat (sslength ss)
         (setq e     (ssname ss i)
@@ -91,22 +100,24 @@
         (if row
           (progn
             (if (nth 3 row) (setq hasChw T))
+            (if (nth 5 row) (setq hasPipe T hasChw T))
             (setq rows (cons row rows))
           )
         )
         (setq i (1+ i))
       )
       (setq rows (vl-sort rows 'rt-compare-room-rows))
-      (setq csvPath (getfiled "Export Room Areas to Excel (CSV)"
-                              (strcat (getvar "DWGPREFIX") "RoomAreas.csv")
+      (setq csvPath (getfiled "Export HVAC Room Data to Excel (CSV)"
+                              (strcat (getvar "DWGPREFIX") "HvacRooms.csv")
                               "csv"
                               1))
       (if csvPath
         (progn
           (setq fp (open csvPath "w"))
-          (if hasChw
-            (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm)" fp)
-            (write-line "Room Name,Room Type,Area (m2)" fp)
+          (cond
+            (hasPipe (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm),Pipe Size" fp))
+            (hasChw  (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm)" fp))
+            (T       (write-line "Room Name,Room Type,Area (m2)" fp))
           )
           (setq rowIdx 1)
           (foreach r rows
@@ -124,17 +135,36 @@
                         ))
               )
             )
+            (if hasPipe
+              (setq line
+                (strcat line ","
+                        (if (nth 5 r)
+                          (rt-csv-escape (nth 6 r))
+                          ""
+                        ))
+              )
+            )
             (write-line line fp)
             (setq rowIdx (1+ rowIdx))
           )
-          (if hasChw
-            (write-line
-              (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) ")")
-              fp
+          (cond
+            (hasPipe
+             (write-line
+               (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) "),")
+               fp
+             )
             )
-            (write-line
-              (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) ")")
-              fp
+            (hasChw
+             (write-line
+               (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) ")")
+               fp
+             )
+            )
+            (T
+             (write-line
+               (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) ")")
+               fp
+             )
             )
           )
           (close fp)
