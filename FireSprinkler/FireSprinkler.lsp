@@ -75,13 +75,36 @@
 
 (setq *ff-loaded* (ff-load-modules))
 
+;; Helper: compute area/sprinklers, place MTEXT, print status, bump counter
+(defun ff-place-room-tag (placePt rawArea / areaM2 sprCount roomName sep labelStr mtextEnt)
+  (setq areaM2   (ff-calc-area rawArea *ff-factor* *ff-bias* *ff-prec* *ff-round-mode*)
+        sprCount (ff-calc-sprinklers areaM2 *ff-cov-area*)
+        roomName (strcat *ff-rtype* "#" (itoa *ff-num*))
+        sep      (if (= *ff-multiline* "1") "\\P" " ")
+        labelStr (ff-format-label roomName areaM2 *ff-prec* sprCount *ff-extra* sep)
+        mtextEnt (ff-create-room-mtext
+                   placePt *ff-height* labelStr roomName *ff-rtype* areaM2
+                   *ff-hazard* *ff-cov-area* sprCount *ff-mtext-layer*
+                 )
+  )
+  (princ
+    (strcat "\nPlaced: " roomName
+            " -> " (rtos areaM2 2 *ff-prec*) " m2"
+            " | " *ff-hazard*
+            " | Sprinklers: " (itoa sprCount))
+  )
+  (ff-set-count *ff-rtype* *ff-num*)
+  (setq *ff-num* (1+ *ff-num*))
+  mtextEnt
+)
+
 ;; --------------------------------------------------------------------------
 ;; COMMAND: FFSPRINKLER
 ;; --------------------------------------------------------------------------
-(defun c:FFSPRINKLER (/ *error* oldEcho keepLoop rc pt res rawArea areaM2 sprCount
-                        roomName sep labelStr previewEnt lastMtext)
+(defun c:FFSPRINKLER (/ *error* oldEcho keepLoop rc pickLoop pickMode inp res
+                        ent selRes previewEnt previewOwned lastMtext)
   (defun *error* (msg)
-    (if previewEnt (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer*))
+    (if previewEnt (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer* previewOwned))
     (if oldEcho (setvar "CMDECHO" oldEcho))
     (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
       (princ (strcat "\nError: " msg))
@@ -96,9 +119,11 @@
   (if (not *ff-loaded*)
     (princ "\nFireSprinkler could not start because required modules failed to load.")
     (progn
-      (setq oldEcho    (getvar "CMDECHO")
-            previewEnt nil
-            lastMtext  nil
+      (setq oldEcho      (getvar "CMDECHO")
+            previewEnt   nil
+            previewOwned nil
+            lastMtext    nil
+            pickMode     "point"
       )
       (setvar "CMDECHO" 0)
       (regapp "FFSPRINKLER_DATA")
@@ -116,24 +141,42 @@
            (ff-do-export)
            (setq keepLoop nil)
           )
-          ;; Pick Rooms
+          ;; Pick / Select Rooms
           ((= rc 1)
-           (setq pt T
+           (setq pickLoop  T
                  lastMtext nil
            )
-           (while pt
-             (initget "Undo Dialog")
-             (setq pt (getpoint (strcat "\nPick inside room for " *ff-rtype* "#" (itoa *ff-num*) " [Undo/Dialog] <Done>: ")))
+           (while pickLoop
+             (if (= pickMode "select")
+               (progn
+                 (setvar "ERRNO" 0)
+                 (initget "Pick Undo Dialog")
+                 (setq inp (entsel (strcat "\nSelect closed polyline for " *ff-rtype* "#" (itoa *ff-num*) " [Pick/Undo/Dialog] <Done>: ")))
+               )
+               (progn
+                 (initget "Select Undo Dialog")
+                 (setq inp (getpoint (strcat "\nPick inside room for " *ff-rtype* "#" (itoa *ff-num*) " [Select/Undo/Dialog] <Done>: ")))
+               )
+             )
              (cond
-               ((= pt "Undo")
+               ((= inp "Select")
+                (setq pickMode "select")
+               )
+               ((= inp "Pick")
+                (setq pickMode "point")
+               )
+               ((= inp "Undo")
                 (if (and lastMtext (entget lastMtext))
                   (progn
                     (entdel lastMtext)
                     (setq lastMtext nil)
                     (if previewEnt
                       (progn
-                        (ff-clear-preview previewEnt nil nil)
-                        (setq previewEnt nil)
+                        ;; Delete if we created it; only unhighlight if pre-existing
+                        (ff-clear-preview previewEnt nil nil previewOwned)
+                        (setq previewEnt   nil
+                              previewOwned nil
+                        )
                       )
                     )
                     (if (> *ff-num* 0)
@@ -145,63 +188,80 @@
                   (princ "\nNothing to undo in this pick session.")
                 )
                )
-               ((= pt "Dialog")
+               ((= inp "Dialog")
                 (if previewEnt
                   (progn
-                    (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer*)
-                    (setq previewEnt nil)
+                    (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer* previewOwned)
+                    (setq previewEnt   nil
+                          previewOwned nil
+                    )
                   )
                 )
                 (setq lastMtext nil
-                      pt        nil
+                      pickLoop  nil
                 )
                )
-               ((null pt)
-                (if previewEnt
+               ((null inp)
+                ;; In select mode, ERRNO=7 means missed pick (keep looping); otherwise Done
+                (if (and (= pickMode "select") (= (getvar "ERRNO") 7))
+                  (princ "\nNo object selected. Try again or press Enter to finish.")
                   (progn
-                    (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer*)
-                    (setq previewEnt nil)
-                  )
-                )
-                (setq keepLoop nil)
-               )
-               ((listp pt)
-                (if previewEnt
-                  (progn
-                    (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer*)
-                    (setq previewEnt nil)
-                  )
-                )
-                (setq res (ff-get-area-at pt))
-                (if res
-                  (progn
-                    (setq rawArea    (car res)
-                          previewEnt (cadr res)
-                    )
-                    (ff-show-preview previewEnt)
-
-                    (setq areaM2   (ff-calc-area rawArea *ff-factor* *ff-bias* *ff-prec* *ff-round-mode*))
-                    (setq sprCount (ff-calc-sprinklers areaM2 *ff-cov-area*))
-                    (setq roomName (strcat *ff-rtype* "#" (itoa *ff-num*)))
-                    (setq sep      (if (= *ff-multiline* "1") "\\P" " "))
-                    (setq labelStr (ff-format-label roomName areaM2 *ff-prec* sprCount *ff-extra* sep))
-
-                    (setq lastMtext
-                      (ff-create-room-mtext
-                        pt *ff-height* labelStr roomName *ff-rtype* areaM2
-                        *ff-hazard* *ff-cov-area* sprCount *ff-mtext-layer*
+                    (if previewEnt
+                      (progn
+                        (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer* previewOwned)
+                        (setq previewEnt   nil
+                              previewOwned nil
+                        )
                       )
                     )
-
-                    (princ
-                      (strcat "\nPlaced: " roomName
-                              " -> " (rtos areaM2 2 *ff-prec*) " m2"
-                              " | " *ff-hazard*
-                              " | Sprinklers: " (itoa sprCount))
+                    (setq pickLoop nil
+                          keepLoop nil
                     )
-
-                    (ff-set-count *ff-rtype* *ff-num*)
-                    (setq *ff-num* (1+ *ff-num*))
+                  )
+                )
+               )
+               ;; Select Mode: entsel returned (ename pickPt)
+               ((and (= pickMode "select") (listp inp) (eq (type (car inp)) 'ENAME))
+                (if previewEnt
+                  (progn
+                    (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer* previewOwned)
+                    (setq previewEnt   nil
+                          previewOwned nil
+                    )
+                  )
+                )
+                (setq ent    (car inp)
+                      selRes (ff-get-area-from-ent ent)
+                )
+                (if selRes
+                  (progn
+                    (setq previewEnt   ent
+                          previewOwned nil
+                    )
+                    (redraw ent 3) ; Highlight selected polyline
+                    (setq lastMtext (ff-place-room-tag (cadr selRes) (car selRes)))
+                  )
+                  (princ "\nSelected object has no closed area. Select a closed polyline, circle, region, or hatch.")
+                )
+               )
+               ;; Point Pick Mode: getpoint returned (x y z)
+               ((listp inp)
+                (if previewEnt
+                  (progn
+                    (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer* previewOwned)
+                    (setq previewEnt   nil
+                          previewOwned nil
+                    )
+                  )
+                )
+                (setq res (ff-get-area-at inp (= *ff-fast-bndry* "1")))
+                (if res
+                  (progn
+                    (setq previewEnt   (cadr res)
+                          previewOwned T
+                    )
+                    (ff-show-preview previewEnt)
+                    (setq lastMtext (ff-place-room-tag inp (car res)))
                   )
                   (princ "\nCould not detect a closed boundary. Ensure the full room is visible and has no gaps.")
                 )
@@ -213,7 +273,7 @@
       )
 
       (if previewEnt
-        (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer*)
+        (ff-clear-preview previewEnt (= *ff-keepbndry* "1") *ff-bndry-layer* previewOwned)
       )
       (setvar "CMDECHO" oldEcho)
     )
