@@ -1,5 +1,5 @@
 ;;; ==========================================================================
-;;; HvacRoom.lsp - Entry Point & Module Loader for HvacRoom (ZWCAD)
+;;; HvacRoom/HvacRoom.lsp - Entry Point & Module Loader for HvacRoom (ZWCAD)
 ;;; Commands: HVACROOM, HVACROOMEXPORT
 ;;; ==========================================================================
 
@@ -75,13 +75,42 @@
 
 (setq *rt-loaded* (rt-load-modules))
 
+;; Helper: compute area/CHW/pipe, place MTEXT, print status, bump counter
+(defun rt-place-room-tag (placePt rawArea / areaM2 chwEn chwGpm pipeStr roomName sep labelStr statusMsg mtextEnt)
+  (setq areaM2   (rt-calc-area rawArea *rt-factor* *rt-bias* *rt-prec* *rt-round-mode*)
+        chwEn    (= *rt-chw-en* "1")
+        chwGpm   (if chwEn (rt-calc-chw areaM2 *rt-ton-factor* *rt-prec*) 0.0)
+        pipeStr  (if (and chwEn (= *rt-pipe-en* "1"))
+                   (rt-calc-pipe-size chwGpm *rt-pipe-min-idx* *rt-pipe-unit*)
+                   nil)
+        roomName (strcat *rt-rtype* "#" (itoa *rt-num*))
+        sep      (if (= *rt-multiline* "1") "\\P" " ")
+        labelStr (rt-format-label roomName areaM2 *rt-prec* *rt-extra* sep chwEn chwGpm pipeStr nil)
+        mtextEnt (rt-create-room-mtext
+                   placePt *rt-height* labelStr roomName *rt-rtype* areaM2
+                   chwEn chwGpm *rt-ton-factor* pipeStr *rt-mtext-layer*
+                 )
+  )
+  (setq statusMsg (strcat "\nPlaced: " roomName " -> " (rtos areaM2 2 *rt-prec*) " m2"))
+  (if chwEn
+    (setq statusMsg (strcat statusMsg " | CHW: " (rtos chwGpm 2 *rt-prec*) " gpm"))
+  )
+  (if pipeStr
+    (setq statusMsg (strcat statusMsg " | phi " pipeStr))
+  )
+  (princ statusMsg)
+  (rt-set-count *rt-rtype* *rt-num*)
+  (setq *rt-num* (1+ *rt-num*))
+  mtextEnt
+)
+
 ;; --------------------------------------------------------------------------
 ;; COMMAND: HVACROOM
 ;; --------------------------------------------------------------------------
-(defun c:HVACROOM (/ *error* oldEcho keepLoop rc pt res rawArea areaM2 chwEn chwGpm
-                     pipeStr roomName sep labelStr statusMsg previewEnt lastMtext)
+(defun c:HVACROOM (/ *error* oldEcho keepLoop rc pickLoop pickMode inp res
+                     ent selRes previewEnt previewOwned lastMtext)
   (defun *error* (msg)
-    (if previewEnt (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*))
+    (if previewEnt (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer* previewOwned))
     (if oldEcho (setvar "CMDECHO" oldEcho))
     (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
       (princ (strcat "\nError: " msg))
@@ -96,9 +125,11 @@
   (if (not *rt-loaded*)
     (princ "\nHvacRoom could not start because required modules failed to load.")
     (progn
-      (setq oldEcho    (getvar "CMDECHO")
-            previewEnt nil
-            lastMtext  nil
+      (setq oldEcho      (getvar "CMDECHO")
+            previewEnt   nil
+            previewOwned nil
+            lastMtext    nil
+            pickMode     "point"
       )
       (setvar "CMDECHO" 0)
       (regapp "ROOMTAG_DATA")
@@ -116,24 +147,42 @@
            (rt-do-export)
            (setq keepLoop nil)
           )
-          ;; Pick Rooms
+          ;; Pick / Select Rooms
           ((= rc 1)
-           (setq pt T
+           (setq pickLoop  T
                  lastMtext nil
            )
-           (while pt
-             (initget "Undo Dialog")
-             (setq pt (getpoint (strcat "\nPick inside room for " *rt-rtype* "#" (itoa *rt-num*) " [Undo/Dialog] <Done>: ")))
+           (while pickLoop
+             (if (= pickMode "select")
+               (progn
+                 (setvar "ERRNO" 0)
+                 (initget "Pick Undo Dialog")
+                 (setq inp (entsel (strcat "\nSelect closed polyline for " *rt-rtype* "#" (itoa *rt-num*) " [Pick/Undo/Dialog] <Done>: ")))
+               )
+               (progn
+                 (initget "Select Undo Dialog")
+                 (setq inp (getpoint (strcat "\nPick inside room for " *rt-rtype* "#" (itoa *rt-num*) " [Select/Undo/Dialog] <Done>: ")))
+               )
+             )
              (cond
-               ((= pt "Undo")
+               ((= inp "Select")
+                (setq pickMode "select")
+               )
+               ((= inp "Pick")
+                (setq pickMode "point")
+               )
+               ((= inp "Undo")
                 (if (and lastMtext (entget lastMtext))
                   (progn
                     (entdel lastMtext)
                     (setq lastMtext nil)
                     (if previewEnt
                       (progn
-                        (rt-clear-preview previewEnt nil nil) ; Always delete undone boundary
-                        (setq previewEnt nil)
+                        ;; Delete if we created it; only unhighlight if pre-existing
+                        (rt-clear-preview previewEnt nil nil previewOwned)
+                        (setq previewEnt   nil
+                              previewOwned nil
+                        )
                       )
                     )
                     (if (> *rt-num* 0)
@@ -145,71 +194,79 @@
                   (princ "\nNothing to undo in this pick session.")
                 )
                )
-               ((= pt "Dialog")
+               ((= inp "Dialog")
                 (if previewEnt
                   (progn
-                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
-                    (setq previewEnt nil)
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer* previewOwned)
+                    (setq previewEnt   nil
+                          previewOwned nil
+                    )
                   )
                 )
                 (setq lastMtext nil
-                      pt        nil
-                ) ; Re-open modal dialog
-               )
-               ((null pt)
-                (if previewEnt
-                  (progn
-                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
-                    (setq previewEnt nil)
-                  )
+                      pickLoop  nil
                 )
-                (setq keepLoop nil) ; Finish command
                )
-               ((listp pt)
-                ;; Finalize/clear previous room's preview before detecting next room
-                (if previewEnt
+               ((null inp)
+                (if (and (= pickMode "select") (= (getvar "ERRNO") 7))
+                  (princ "\nNo object selected. Try again or press Enter to finish.")
                   (progn
-                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
-                    (setq previewEnt nil)
-                  )
-                )
-                (setq res (rt-get-area-at pt))
-                (if res
-                  (progn
-                    (setq rawArea    (car res)
-                          previewEnt (cadr res)
-                    )
-                    ;; Highlight detected boundary polyline as quick preview
-                    (rt-show-preview previewEnt)
-
-                    (setq areaM2   (rt-calc-area rawArea *rt-factor* *rt-bias* *rt-prec* *rt-round-mode*))
-                    (setq chwEn    (= *rt-chw-en* "1"))
-                    (setq chwGpm   (if chwEn (rt-calc-chw areaM2 *rt-ton-factor* *rt-prec*) 0.0))
-                    (setq pipeStr  (if (and chwEn (= *rt-pipe-en* "1"))
-                                     (rt-calc-pipe-size chwGpm *rt-pipe-min-idx* *rt-pipe-unit*)
-                                     nil))
-                    (setq roomName (strcat *rt-rtype* "#" (itoa *rt-num*)))
-                    (setq sep      (if (= *rt-multiline* "1") "\\P" " "))
-                    (setq labelStr (rt-format-label roomName areaM2 *rt-prec* *rt-extra* sep chwEn chwGpm pipeStr nil))
-
-                    (setq lastMtext
-                      (rt-create-room-mtext
-                        pt *rt-height* labelStr roomName *rt-rtype* areaM2
-                        chwEn chwGpm *rt-ton-factor* pipeStr *rt-mtext-layer*
+                    (if previewEnt
+                      (progn
+                        (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer* previewOwned)
+                        (setq previewEnt   nil
+                              previewOwned nil
+                        )
                       )
                     )
-
-                    (setq statusMsg (strcat "\nPlaced: " roomName " -> " (rtos areaM2 2 *rt-prec*) " m2"))
-                    (if chwEn
-                      (setq statusMsg (strcat statusMsg " | CHW: " (rtos chwGpm 2 *rt-prec*) " gpm"))
+                    (setq pickLoop nil
+                          keepLoop nil
                     )
-                    (if pipeStr
-                      (setq statusMsg (strcat statusMsg " | phi " pipeStr))
+                  )
+                )
+               )
+               ;; Select Mode: entsel returned (ename pickPt)
+               ((and (= pickMode "select") (listp inp) (eq (type (car inp)) 'ENAME))
+                (if previewEnt
+                  (progn
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer* previewOwned)
+                    (setq previewEnt   nil
+                          previewOwned nil
                     )
-                    (princ statusMsg)
-
-                    (rt-set-count *rt-rtype* *rt-num*)
-                    (setq *rt-num* (1+ *rt-num*))
+                  )
+                )
+                (setq ent    (car inp)
+                      selRes (rt-get-area-from-ent ent)
+                )
+                (if selRes
+                  (progn
+                    (setq previewEnt   ent
+                          previewOwned nil
+                    )
+                    (redraw ent 3) ; Highlight selected polyline
+                    (setq lastMtext (rt-place-room-tag (cadr selRes) (car selRes)))
+                  )
+                  (princ "\nSelected object has no closed area. Select a closed polyline, circle, region, or hatch.")
+                )
+               )
+               ;; Point Pick Mode: getpoint returned (x y z)
+               ((listp inp)
+                (if previewEnt
+                  (progn
+                    (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer* previewOwned)
+                    (setq previewEnt   nil
+                          previewOwned nil
+                    )
+                  )
+                )
+                (setq res (rt-get-area-at inp (= *rt-fast-bndry* "1")))
+                (if res
+                  (progn
+                    (setq previewEnt   (cadr res)
+                          previewOwned T
+                    )
+                    (rt-show-preview previewEnt)
+                    (setq lastMtext (rt-place-room-tag inp (car res)))
                   )
                   (princ "\nCould not detect a closed boundary. Ensure the full room is visible and has no gaps.")
                 )
@@ -221,7 +278,7 @@
       )
 
       (if previewEnt
-        (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*)
+        (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer* previewOwned)
       )
       (setvar "CMDECHO" oldEcho)
     )
