@@ -3,7 +3,7 @@
 // ============================================================================
 
 roomtag_dlg : dialog {
-  label = "Room Area Tagger";
+  label = "HVAC Room Area & CHW Tagger";
 
   : boxed_column {
     label = "Room Info";
@@ -68,19 +68,37 @@ roomtag_dlg : dialog {
   }
 
   : boxed_column {
-    label = "Chilled Water Flow (AC)";
-    : toggle {
-      key = "chw_en";
-      label = "Enable Chilled Water Flow (GPM)";
-    }
-    : edit_box {
-      key = "tonfactor";
-      label = "Area Ton Factor:";
-      edit_width = 12;
+    label = "Chilled Water Flow (AC) & Pipe Sizing";
+    : row {
+      : toggle {
+        key = "chw_en";
+        label = "Enable CHW Flow (GPM)";
+      }
+      : edit_box {
+        key = "tonfactor";
+        label = "Area Ton Factor:";
+        edit_width = 10;
+      }
     }
     : text {
       key = "chw_hint";
-      label = "Formula: GPM = (Area / Area Ton Factor) * 2.4";
+      label = "GPM = (Area / Area Ton Factor) * 2.4 | Pipe: 4 ft/100 ft (<=4\"), 8 fps (>=5\")";
+    }
+    : toggle {
+      key = "pipe_en";
+      label = "Show Pipe Diameter";
+    }
+    : row {
+      : radio_row {
+        label = "Pipe Unit:";
+        : radio_button { key = "pipe_u_mm"; label = "mm"; }
+        : radio_button { key = "pipe_u_in"; label = "inch"; }
+      }
+      : popup_list {
+        key = "min_pipe";
+        label = "Min Dia:";
+        edit_width = 10;
+      }
     }
   }
 
