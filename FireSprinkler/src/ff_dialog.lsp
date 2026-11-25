@@ -307,6 +307,7 @@
           (action_tile "keepbndry" "(ff-dlg-on-keepbndry-toggle)")
 
           (action_tile "pick"   "(if (ff-dlg-validate-and-save) (done_dialog 1))")
+          (action_tile "append" "(if (ff-dlg-validate-and-save) (done_dialog 3))")
           (action_tile "export" "(done_dialog 2)")
           (action_tile "cancel" "(done_dialog 0)")
 
