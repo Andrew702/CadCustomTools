@@ -179,4 +179,80 @@
   out
 )
 
+;; --------------------------------------------------------------------------
+;; Extract numeric area from plain MTEXT containing "Area: <num>" (fallback)
+;; Returns float > 0.0 or nil.
+;; --------------------------------------------------------------------------
+(defun ff-extract-area-from-text (txt / up pos sub len i ch numStr val)
+  (if (not (eq (type txt) 'STR))
+    nil
+    (progn
+      (setq up  (strcase txt)
+            pos (vl-string-search "AREA:" up)
+      )
+      (if pos
+        (progn
+          (setq sub (vl-string-left-trim " \t" (substr txt (+ pos 6)))
+                len (strlen sub)
+                i   1
+                numStr ""
+          )
+          (while (<= i len)
+            (setq ch (substr sub i 1))
+            (if (or (and (>= (ascii ch) 48) (<= (ascii ch) 57))
+                    (= ch ".")
+                    (and (= i 1) (or (= ch "+") (= ch "-"))))
+              (setq numStr (strcat numStr ch)
+                    i      (1+ i))
+              (setq i (1+ len))
+            )
+          )
+          (if (and (ff-valid-number-p numStr) (> (setq val (atof numStr)) 0.0))
+            val
+            nil
+          )
+        )
+        nil
+      )
+    )
+  )
+)
+
+;; --------------------------------------------------------------------------
+;; Append "Sprinklers: <N>" to an existing MTEXT string, or update it in-place
+;; if "Sprinklers:" is already present.
+;; --------------------------------------------------------------------------
+(defun ff-append-or-replace-sprinklers (txt sprCount preferMultiline
+                                        / up pos prefix after len i ch sep)
+  (setq up  (strcase txt)
+        pos (vl-string-search "SPRINKLERS:" up)
+  )
+  (if pos
+    (progn
+      (setq prefix (if (> pos 0) (substr txt 1 pos) "")
+            after  (substr txt (+ pos 12))
+            len    (strlen after)
+            i      1
+      )
+      ;; Skip leading spaces and existing integer digits after "Sprinklers:"
+      (while (and (<= i len) (or (= (substr after i 1) " ") (= (substr after i 1) "\t")))
+        (setq i (1+ i))
+      )
+      (while (and (<= i len)
+                  (>= (ascii (substr after i 1)) 48)
+                  (<= (ascii (substr after i 1)) 57))
+        (setq i (1+ i))
+      )
+      (strcat prefix "Sprinklers: " (itoa sprCount)
+              (if (<= i len) (substr after i) ""))
+    )
+    (progn
+      (setq sep (if (or preferMultiline (vl-string-search "\\P" txt) (vl-string-search "\\p" txt))
+                  "\\P"
+                  " "))
+      (strcat txt sep "Sprinklers: " (itoa sprCount))
+    )
+  )
+)
+
 (princ)
