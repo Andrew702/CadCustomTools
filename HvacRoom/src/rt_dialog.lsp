@@ -228,6 +228,7 @@
            *rt-pipe-min-idx* (atoi (get_tile "min_pipe"))
            *rt-multiline*    (get_tile "multiline")
            *rt-keepbndry*    (get_tile "keepbndry")
+           *rt-fast-bndry*   (get_tile "fastbndry")
            *rt-mtext-layer*  (if (and *rt-dlg-layers* (< mIdx (length *rt-dlg-layers*)))
                                (nth mIdx *rt-dlg-layers*)
                                "<Current>")
@@ -279,6 +280,7 @@
           (set_tile "min_pipe"    (itoa *rt-pipe-min-idx*))
           (set_tile "multiline"   *rt-multiline*)
           (set_tile "keepbndry"   *rt-keepbndry*)
+          (set_tile "fastbndry"   *rt-fast-bndry*)
           (set_tile "mtext_layer" (itoa (rt-dlg-list-index *rt-mtext-layer* *rt-dlg-layers*)))
           (set_tile "bndry_layer" (itoa (rt-dlg-list-index *rt-bndry-layer* *rt-dlg-layers*)))
 
