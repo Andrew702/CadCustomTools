@@ -17,9 +17,12 @@
 (if (not *rt-round-mode*) (setq *rt-round-mode* "nearest")) ; "nearest", "up", or "down"
 (if (not *rt-prec*)       (setq *rt-prec*       2))         ; decimal places
 
-;; Chilled Water Flow (AC) defaults
-(if (not *rt-chw-en*)     (setq *rt-chw-en*     "0"))       ; "1" = Enabled, "0" = Disabled
-(if (not *rt-ton-factor*) (setq *rt-ton-factor* 15.0))      ; Area Ton Factor (m2/ton)
+;; Chilled Water Flow (AC) & Pipe Sizing defaults
+(if (not *rt-chw-en*)       (setq *rt-chw-en*       "0"))    ; "1" = Enabled, "0" = Disabled
+(if (not *rt-ton-factor*)   (setq *rt-ton-factor*   15.0))   ; Area Ton Factor (m2/ton)
+(if (not *rt-pipe-en*)      (setq *rt-pipe-en*      "0"))    ; "1" = Show pipe diameter, "0" = Disabled
+(if (not *rt-pipe-unit*)    (setq *rt-pipe-unit*    "mm"))   ; "mm" or "inch"
+(if (not *rt-pipe-min-idx*) (setq *rt-pipe-min-idx* 0))      ; 0-based index into pipe sizing table (0 = 15mm / 1/2")
 
 ;; Output & layer options
 (if (not *rt-multiline*)   (setq *rt-multiline*   "0"))          ; "1" = Multi-line, "0" = Single-line
