@@ -134,18 +134,23 @@ ffsprinkler_dlg : dialog {
       key = "pick";
       label = "Pick Rooms";
       is_default = true;
-      width = 14;
+      width = 13;
+    }
+    : button {
+      key = "append";
+      label = "Append to Tags";
+      width = 16;
     }
     : button {
       key = "export";
-      label = "Export Excel (CSV)";
-      width = 18;
+      label = "Export CSV";
+      width = 13;
     }
     : button {
       key = "cancel";
       label = "Cancel";
       is_cancel = true;
-      width = 12;
+      width = 10;
     }
   }
 }
