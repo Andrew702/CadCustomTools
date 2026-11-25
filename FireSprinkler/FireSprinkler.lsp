@@ -141,6 +141,11 @@
            (ff-do-export)
            (setq keepLoop nil)
           )
+          ;; Append Sprinklers to existing MTEXT area tags
+          ((= rc 3)
+           (ff-append-sprinklers-to-selection)
+           (setq keepLoop nil)
+          )
           ;; Pick / Select Rooms
           ((= rc 1)
            (setq pickLoop  T
@@ -282,6 +287,20 @@
 )
 
 ;; --------------------------------------------------------------------------
+;; COMMAND: FFAPPEND (direct shortcut to append sprinklers to selected tags)
+;; --------------------------------------------------------------------------
+(defun c:FFAPPEND ()
+  (if (not *ff-loaded*)
+    (setq *ff-loaded* (ff-load-modules))
+  )
+  (if *ff-loaded*
+    (ff-append-sprinklers-to-selection)
+    (princ "\nFireSprinkler modules are not loaded.")
+  )
+  (princ)
+)
+
+;; --------------------------------------------------------------------------
 ;; COMMAND: FFEXPORT (direct shortcut without opening dialog)
 ;; --------------------------------------------------------------------------
 (defun c:FFEXPORT ()
@@ -296,6 +315,6 @@
 )
 
 (if *ff-loaded*
-  (princ "\nFireSprinkler loaded. Commands: FFSPRINKLER, FFEXPORT\n")
+  (princ "\nFireSprinkler loaded. Commands: FFSPRINKLER, FFAPPEND, FFEXPORT\n")
 )
 (princ)
