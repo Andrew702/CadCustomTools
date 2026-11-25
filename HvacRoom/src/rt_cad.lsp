@@ -29,12 +29,17 @@
 )
 
 ;; Detect closed boundary at picked point (Xref-compatible).
+;; When skipIslands is non-nil, disables Island Detection (Nearest ray cast)
+;; for faster boundary tracing on dense floorplans.
 ;; Deletes any inner island boundaries and returns (list maxArea maxEnt),
 ;; leaving maxEnt alive so the caller can display a polyline preview and
 ;; later clean it up with rt-clear-preview. Returns nil on failure.
-(defun rt-get-area-at (pt / lastEnt e ents maxArea maxEnt a obj)
+(defun rt-get-area-at (pt skipIslands / lastEnt e ents maxArea maxEnt a obj)
   (setq lastEnt (entlast))
-  (command "_.-boundary" "_non" pt "")
+  (if skipIslands
+    (command "_.-boundary" "_A" "_I" "_N" "_N" "" "_non" pt "")
+    (command "_.-boundary" "_non" pt "")
+  )
   (while (> (getvar "CMDACTIVE") 0)
     (command "")
   )
@@ -69,6 +74,36 @@
   )
 )
 
+;; Instantly read area and bounding-box center (in UCS) from an existing
+;; closed polyline, circle, ellipse, region, or hatch. Returns (list area pt) or nil.
+(defun rt-get-area-from-ent (ent / obj a minPt maxPt p1 p2 mid)
+  (if (and ent (entget ent))
+    (progn
+      (setq obj (vlax-ename->vla-object ent))
+      (setq a (vl-catch-all-apply 'vla-get-Area (list obj)))
+      (if (and (not (vl-catch-all-error-p a)) (numberp a) (> a 0.0))
+        (progn
+          (if (not (vl-catch-all-error-p
+                     (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'minPt 'maxPt))))
+            (progn
+              (setq p1  (vlax-safearray->list minPt)
+                    p2  (vlax-safearray->list maxPt)
+                    mid (list (/ (+ (car p1) (car p2)) 2.0)
+                              (/ (+ (cadr p1) (cadr p2)) 2.0)
+                              0.0)
+              )
+              (list a (trans mid 0 1))
+            )
+            nil
+          )
+        )
+        nil
+      )
+    )
+    nil
+  )
+)
+
 ;; Highlight the detected boundary polyline in bright green as a quick preview
 (defun rt-show-preview (ent / obj)
   (if (and ent (entget ent))
@@ -81,24 +116,30 @@
   )
 )
 
-;; Clear the preview polyline: delete it unless keepBoundary is non-nil.
-;; When kept as a persistent area object, assign targetLayer (if specified),
-;; restore ByLayer color, and remove the temporary highlight.
-(defun rt-clear-preview (ent keepBoundary bndryLayer / obj resolvedLayer)
+;; Clear the preview polyline:
+;; - If owned is nil (pre-existing selected object): only unhighlight it.
+;; - If owned is non-nil and keepBoundary is non-nil: assign targetLayer, ByLayer, unhighlight.
+;; - If owned is non-nil and keepBoundary is nil: delete temporary boundary.
+(defun rt-clear-preview (ent keepBoundary bndryLayer owned / obj resolvedLayer)
   (if (and ent (entget ent))
-    (if keepBoundary
-      (progn
-        (setq obj           (vlax-ename->vla-object ent)
-              resolvedLayer (rt-resolve-layer bndryLayer)
-        )
-        (if resolvedLayer
-          (vl-catch-all-apply 'vla-put-Layer (list obj resolvedLayer))
-        )
-        (vl-catch-all-apply 'vla-put-Color (list obj 256)) ; ByLayer
-        (vl-catch-all-apply 'vla-Update (list obj))
-        (redraw ent 4) ; Unhighlight
+    (cond
+      ((not owned)
+       (redraw ent 4) ; Unhighlight existing object only
       )
-      (entdel ent)
+      (keepBoundary
+       (setq obj           (vlax-ename->vla-object ent)
+             resolvedLayer (rt-resolve-layer bndryLayer)
+       )
+       (if resolvedLayer
+         (vl-catch-all-apply 'vla-put-Layer (list obj resolvedLayer))
+       )
+       (vl-catch-all-apply 'vla-put-Color (list obj 256)) ; ByLayer
+       (vl-catch-all-apply 'vla-Update (list obj))
+       (redraw ent 4) ; Unhighlight
+      )
+      (T
+       (entdel ent)
+      )
     )
   )
 )
