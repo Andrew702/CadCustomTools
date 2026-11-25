@@ -27,6 +27,7 @@
 ;; Output & layer options
 (if (not *rt-multiline*)   (setq *rt-multiline*   "0"))          ; "1" = Multi-line, "0" = Single-line
 (if (not *rt-keepbndry*)   (setq *rt-keepbndry*   "0"))          ; "1" = Keep area polyline, "0" = Delete
+(if (not *rt-fast-bndry*)  (setq *rt-fast-bndry*  "0"))          ; "1" = Skip island detection in -boundary
 (if (not *rt-mtext-layer*) (setq *rt-mtext-layer* "<Current>"))  ; Target layer for MTEXT
 (if (not *rt-bndry-layer*) (setq *rt-bndry-layer* "<Current>"))  ; Target layer for persistent area polyline
 
