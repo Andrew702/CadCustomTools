@@ -1,6 +1,6 @@
 ;;; ==========================================================================
-;;; RoomTag.lsp - Entry Point & Module Loader for RoomTag V1.1 (ZWCAD)
-;;; Commands: ROOMTAG, ROOMEXPORT
+;;; HvacRoom.lsp - Entry Point & Module Loader for HvacRoom (ZWCAD)
+;;; Commands: HVACROOM, HVACROOMEXPORT
 ;;; ==========================================================================
 
 (vl-load-com)
@@ -24,7 +24,7 @@
     ((and *rt-root-dir* (findfile (strcat *rt-root-dir* "src/rt_state.lsp")))
      *rt-root-dir*
     )
-    ((setq p (findfile "RoomTag.lsp"))
+    ((setq p (findfile "HvacRoom.lsp"))
      (rt-ensure-trailing-slash (vl-filename-directory p))
     )
     ((setq p (findfile "src/rt_state.lsp"))
@@ -33,7 +33,7 @@
     ((findfile (strcat (getvar "DWGPREFIX") "src/rt_state.lsp"))
      (rt-ensure-trailing-slash (getvar "DWGPREFIX"))
     )
-    ((setq p (getfiled "Locate RoomTag.lsp (add folder to Support Path to skip)" "RoomTag.lsp" "lsp" 0))
+    ((setq p (getfiled "Locate HvacRoom.lsp (add folder to Support Path to skip)" "HvacRoom.lsp" "lsp" 0))
      (rt-ensure-trailing-slash (vl-filename-directory p))
     )
     (T nil)
@@ -44,7 +44,7 @@
   (setq *rt-root-dir* (rt-resolve-root-dir))
   (if (null *rt-root-dir*)
     (progn
-      (princ "\nError: Could not locate RoomTag src/ modules.")
+      (princ "\nError: Could not locate HvacRoom src/ modules.")
       nil
     )
     (progn
@@ -73,10 +73,10 @@
 (setq *rt-loaded* (rt-load-modules))
 
 ;; --------------------------------------------------------------------------
-;; COMMAND: ROOMTAG
+;; COMMAND: HVACROOM
 ;; --------------------------------------------------------------------------
-(defun c:ROOMTAG (/ *error* oldEcho keepLoop rc pt res rawArea areaM2 chwEn chwGpm
-                    roomName sep labelStr statusMsg previewEnt lastMtext)
+(defun c:HVACROOM (/ *error* oldEcho keepLoop rc pt res rawArea areaM2 chwEn chwGpm
+                     pipeStr roomName sep labelStr statusMsg previewEnt lastMtext)
   (defun *error* (msg)
     (if previewEnt (rt-clear-preview previewEnt (= *rt-keepbndry* "1") *rt-bndry-layer*))
     (if oldEcho (setvar "CMDECHO" oldEcho))
@@ -91,7 +91,7 @@
   )
 
   (if (not *rt-loaded*)
-    (princ "\nRoomTag could not start because required modules failed to load.")
+    (princ "\nHvacRoom could not start because required modules failed to load.")
     (progn
       (setq oldEcho    (getvar "CMDECHO")
             previewEnt nil
@@ -182,20 +182,26 @@
                     (setq areaM2   (rt-calc-area rawArea *rt-factor* *rt-bias* *rt-prec* *rt-round-mode*))
                     (setq chwEn    (= *rt-chw-en* "1"))
                     (setq chwGpm   (if chwEn (rt-calc-chw areaM2 *rt-ton-factor* *rt-prec*) 0.0))
+                    (setq pipeStr  (if (and chwEn (= *rt-pipe-en* "1"))
+                                     (rt-calc-pipe-size chwGpm *rt-pipe-min-idx* *rt-pipe-unit*)
+                                     nil))
                     (setq roomName (strcat *rt-rtype* "#" (itoa *rt-num*)))
                     (setq sep      (if (= *rt-multiline* "1") "\\P" " "))
-                    (setq labelStr (rt-format-label roomName areaM2 *rt-prec* *rt-extra* sep chwEn chwGpm))
+                    (setq labelStr (rt-format-label roomName areaM2 *rt-prec* *rt-extra* sep chwEn chwGpm pipeStr nil))
 
                     (setq lastMtext
                       (rt-create-room-mtext
                         pt *rt-height* labelStr roomName *rt-rtype* areaM2
-                        chwEn chwGpm *rt-ton-factor* *rt-mtext-layer*
+                        chwEn chwGpm *rt-ton-factor* pipeStr *rt-mtext-layer*
                       )
                     )
 
                     (setq statusMsg (strcat "\nPlaced: " roomName " -> " (rtos areaM2 2 *rt-prec*) " m2"))
                     (if chwEn
                       (setq statusMsg (strcat statusMsg " | CHW: " (rtos chwGpm 2 *rt-prec*) " gpm"))
+                    )
+                    (if pipeStr
+                      (setq statusMsg (strcat statusMsg " | phi " pipeStr))
                     )
                     (princ statusMsg)
 
@@ -221,20 +227,20 @@
 )
 
 ;; --------------------------------------------------------------------------
-;; COMMAND: ROOMEXPORT (direct shortcut without opening dialog)
+;; COMMAND: HVACROOMEXPORT (direct shortcut without opening dialog)
 ;; --------------------------------------------------------------------------
-(defun c:ROOMEXPORT ()
+(defun c:HVACROOMEXPORT ()
   (if (not *rt-loaded*)
     (setq *rt-loaded* (rt-load-modules))
   )
   (if *rt-loaded*
     (rt-do-export)
-    (princ "\nRoomTag modules are not loaded.")
+    (princ "\nHvacRoom modules are not loaded.")
   )
   (princ)
 )
 
 (if *rt-loaded*
-  (princ "\nRoomTag V1.1 loaded. Commands: ROOMTAG, ROOMEXPORT\n")
+  (princ "\nHvacRoom loaded. Commands: HVACROOM, HVACROOMEXPORT\n")
 )
 (princ)
