@@ -119,7 +119,10 @@
   (if (not *sh-loaded*)
     (princ "\nSelectionHistory could not start because required modules failed to load.")
     (progn
+      ;; Harvest any deferred in-command _P selection before displaying history
+      (sh-harvest-previous *sh-last-cmd*)
       (sh-log-begin "SH" nil)
+
       ;; Snapshot any currently highlighted grips so Cancel restores them cleanly
       (setq prevSS (ssget "_I"))
       (if (and prevSS (> (sslength prevSS) 0))
@@ -183,6 +186,7 @@
 
   (if *sh-loaded*
     (progn
+      (sh-harvest-previous *sh-last-cmd*)
       (sh-log-begin (strcat "SH" (if (numberp idx) (itoa idx) "")) (list (cons "slot" idx)))
       (setq recalled (sh-recall-slot idx nil))
       (sh-log-end (if recalled "recalled" "recall_failed") (list (cons "slot" idx)))
@@ -232,6 +236,7 @@
   )
   (if *sh-loaded*
     (progn
+      (sh-harvest-previous *sh-last-cmd*)
       (sh-log-begin "(sh)" (list (cons "slot" idx) (cons "transparent" 'true)))
       (setq res (sh-recall-slot idx T))
       (sh-log-end (if res "recalled" "recall_failed") (list (cons "slot" idx)))
