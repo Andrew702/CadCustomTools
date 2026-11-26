@@ -416,6 +416,7 @@
     (setq dclPath (sf-write-temp-dcl groups *sf-by-layer*))
     (if (null dclPath)
       (progn
+        (sf-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "temp_dcl_write_failed")))
         (princ "\nError: SmartFilter could not create temporary DCL file.")
         (setq keepLoop nil
               res      nil
@@ -426,6 +427,7 @@
         (if (or (null dclId) (< dclId 0))
           (progn
             (sf-cleanup-temp-dcl)
+            (sf-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "load_dialog_failed") (cons "path" dclPath)))
             (princ "\nError: SmartFilter could not load dialog definition.")
             (setq keepLoop nil
                   res      nil
@@ -435,6 +437,7 @@
             (progn
               (unload_dialog dclId)
               (sf-cleanup-temp-dcl)
+              (sf-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "new_dialog_failed") (cons "path" dclPath)))
               (princ "\nError: SmartFilter could not initialize dialog.")
               (setq keepLoop nil
                     res      nil
@@ -487,14 +490,31 @@
               (cond
                 ((= rc 2)
                  ;; Rebuild dialog in toggled layer mode
+                 (sf-log-event "INFO" "DIALOG_MODE_TOGGLE"
+                   (list (cons "by_layer" (sf-log-bool (= *sf-by-layer* "1"))))
+                 )
                  (setq keepLoop T)
                 )
                 ((= rc 1)
+                 (sf-log-event "INFO" "DIALOG_CLOSE"
+                   (list
+                     (cons "rc"       rc)
+                     (cons "outcome"  "ok")
+                     (cons "by_layer" (sf-log-bool (= *sf-by-layer* "1")))
+                   )
+                 )
                  (setq res      *sf-dlg-result*
                        keepLoop nil
                  )
                 )
                 (T
+                 (sf-log-event "INFO" "DIALOG_CLOSE"
+                   (list
+                     (cons "rc"       rc)
+                     (cons "outcome"  "cancel")
+                     (cons "by_layer" (sf-log-bool (= *sf-by-layer* "1")))
+                   )
+                 )
                  (setq res      nil
                        keepLoop nil
                  )
