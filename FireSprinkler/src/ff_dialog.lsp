@@ -159,30 +159,37 @@
   (cond
     ((= rt "")
      (set_tile "error" "Please enter a Room Type.")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "rtype") (cons "value" rt)))
      nil
     )
     ((not (ff-valid-uint-p snStr))
      (set_tile "error" "Start Number must be a non-negative integer.")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "startnum") (cons "value" snStr)))
      nil
     )
     ((or (not (ff-valid-number-p htStr)) (<= (atof htStr) 0.0))
      (set_tile "error" "Font Size must be a number greater than 0.")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "height") (cons "value" htStr)))
      nil
     )
     ((or (not (ff-valid-number-p fStr)) (<= (atof fStr) 0.0))
      (set_tile "error" "Scale Factor must be a number greater than 0 (e.g. 1e-6 or 1e-2).")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "factor") (cons "value" fStr)))
      nil
     )
     ((not (ff-valid-number-p bStr))
      (set_tile "error" "Area Bias must be a valid number (positive, 0, or negative).")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "bias") (cons "value" bStr)))
      nil
     )
     ((or (not (ff-valid-uint-p prStr)) (> (atoi prStr) 6))
      (set_tile "error" "Decimals must be an integer between 0 and 6.")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "prec") (cons "value" prStr)))
      nil
     )
     ((or (not (ff-valid-number-p covStr)) (<= (atof covStr) 0.0))
      (set_tile "error" "Area per Sprinkler must be a number greater than 0.")
+     (ff-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "cov_area") (cons "value" covStr)))
      nil
     )
     (T
@@ -223,11 +230,12 @@
   )
 )
 
-;; Show modal dialog (returns: 1 = Pick Rooms, 2 = Export CSV, 0 = Cancel)
+;; Show modal dialog (returns: 1 = Pick Rooms, 2 = Export CSV, 3 = Append, 0 = Cancel)
 (defun ff-show-dialog (/ dclPath dclId rc)
   (setq dclPath (strcat *ff-root-dir* "src/ff_dialog.dcl"))
   (if (not (findfile dclPath))
     (progn
+      (ff-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "dcl_not_found") (cons "path" dclPath)))
       (princ (strcat "\nError: Dialog file not found at: " dclPath))
       0
     )
@@ -236,6 +244,7 @@
       (if (not (new_dialog "ffsprinkler_dlg" dclId))
         (progn
           (if (> dclId 0) (unload_dialog dclId))
+          (ff-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "new_dialog_failed") (cons "path" dclPath)))
           (princ "\nError: Could not initialize FireSprinkler dialog.")
           0
         )
