@@ -52,7 +52,8 @@
       nil
     )
     (progn
-      (setq modules '("src/sh_store.lsp"
+      (setq modules '("src/sh_log.lsp"
+                      "src/sh_store.lsp"
                       "src/sh_reactor.lsp"
                       "src/sh_dialog.lsp")
             ok      T
@@ -64,6 +65,14 @@
           (progn
             (princ (strcat "\nError: Missing module: " modPath))
             (setq ok nil)
+          )
+        )
+      )
+      (if sh-log-reactor-event
+        (sh-log-reactor-event (if ok "INFO" "ERROR") "MODULE_LOAD"
+          (list
+            (cons "root_dir" *sh-root-dir*)
+            (cons "ok"       (sh-log-bool ok))
           )
         )
       )
@@ -83,10 +92,16 @@
 ;; Interactive Picker Command Runner (SH / SELHIST)
 ;; --------------------------------------------------------------------------
 
-(defun sh-run-dialog (/ *error* prevSS prevSnap slotIdx)
+(defun sh-run-dialog (/ *error* prevSS prevSnap slotIdx recalled)
   (defun *error* (msg)
     (if sh-cleanup-temp-dcl
       (sh-cleanup-temp-dcl)
+    )
+    (if sh-log-error
+      (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
+        (sh-log-error msg)
+        (sh-log-end "cancelled" nil)
+      )
     )
     (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
       (princ (strcat "\nError: " msg))
@@ -104,6 +119,7 @@
   (if (not *sh-loaded*)
     (princ "\nSelectionHistory could not start because required modules failed to load.")
     (progn
+      (sh-log-begin "SH" nil)
       ;; Snapshot any currently highlighted grips so Cancel restores them cleanly
       (setq prevSS (ssget "_I"))
       (if (and prevSS (> (sslength prevSS) 0))
@@ -112,7 +128,12 @@
 
       (setq slotIdx (sh-show-dialog))
       (if slotIdx
-        (sh-recall-slot slotIdx nil)
+        (progn
+          (setq recalled (sh-recall-slot slotIdx nil))
+          (sh-log-end (if recalled "recalled" "recall_failed")
+            (list (cons "slot" slotIdx))
+          )
+        )
         (progn
           (if (and prevSS (> (sslength prevSS) 0))
             (progn
@@ -125,6 +146,9 @@
             )
           )
           (princ "\nSelection History: Cancelled.")
+          (sh-log-end "cancelled"
+            (list (cons "restored_pickfirst" (sh-log-bool (and prevSS (> (sslength prevSS) 0)))))
+          )
         )
       )
     )
@@ -136,8 +160,14 @@
 ;; Direct Slot Command Runner (SH1 .. SH5)
 ;; --------------------------------------------------------------------------
 
-(defun sh-run-slot (idx / *error*)
+(defun sh-run-slot (idx / *error* recalled)
   (defun *error* (msg)
+    (if sh-log-error
+      (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
+        (sh-log-error msg)
+        (sh-log-end "cancelled" nil)
+      )
+    )
     (if (and msg (not (wcmatch (strcase msg) "*BREAK,*CANCEL*,*EXIT*")))
       (princ (strcat "\nError: " msg))
     )
@@ -152,14 +182,18 @@
   )
 
   (if *sh-loaded*
-    (sh-recall-slot idx nil)
+    (progn
+      (sh-log-begin (strcat "SH" (if (numberp idx) (itoa idx) "")) (list (cons "slot" idx)))
+      (setq recalled (sh-recall-slot idx nil))
+      (sh-log-end (if recalled "recalled" "recall_failed") (list (cons "slot" idx)))
+    )
     (princ "\nSelectionHistory could not start because required modules failed to load.")
   )
   (princ)
 )
 
 ;; --------------------------------------------------------------------------
-;; COMMANDS: SH, SELHIST, SH1 .. SH5
+;; COMMANDS: SH, SELHIST, SH1 .. SH5, SHDEBUG
 ;; --------------------------------------------------------------------------
 
 (defun c:SELHIST () (sh-run-dialog))
@@ -170,12 +204,7 @@
 (defun c:SH4 () (sh-run-slot 4))
 (defun c:SH5 () (sh-run-slot 5))
 
-;; --------------------------------------------------------------------------
-;; TRANSPARENT MID-COMMAND RECALL: (sh 1) .. (sh 5), (sh1) .. (sh5)
-;; Use directly at any "Select objects:" prompt (returns a <Selection set>).
-;; --------------------------------------------------------------------------
-
-(defun sh (idx)
+(defun c:SHDEBUG ()
   (if (not *sh-loaded*)
     (progn
       (setq *sh-loaded* (sh-load-modules))
@@ -183,7 +212,31 @@
     )
   )
   (if *sh-loaded*
-    (sh-recall-slot idx T)
+    (sh-log-debug-cmd)
+    (princ "\nSelectionHistory modules are not loaded.")
+  )
+  (princ)
+)
+
+;; --------------------------------------------------------------------------
+;; TRANSPARENT MID-COMMAND RECALL: (sh 1) .. (sh 5), (sh1) .. (sh5)
+;; Use directly at any "Select objects:" prompt (returns a <Selection set>).
+;; --------------------------------------------------------------------------
+
+(defun sh (idx / res)
+  (if (not *sh-loaded*)
+    (progn
+      (setq *sh-loaded* (sh-load-modules))
+      (if *sh-loaded* (sh-install-reactors))
+    )
+  )
+  (if *sh-loaded*
+    (progn
+      (sh-log-begin "(sh)" (list (cons "slot" idx) (cons "transparent" 'true)))
+      (setq res (sh-recall-slot idx T))
+      (sh-log-end (if res "recalled" "recall_failed") (list (cons "slot" idx)))
+      res
+    )
     nil
   )
 )
@@ -195,6 +248,6 @@
 (defun sh5 () (sh 5))
 
 (if *sh-loaded*
-  (princ "\nSelectionHistory loaded (tracking last 5 selections). Use SH, SH1-SH5, or (sh 1)-(sh 5).")
+  (princ "\nSelectionHistory loaded (tracking last 5 selections). Use SH, SH1-SH5, (sh 1)-(sh 5), or SHDEBUG.")
 )
 (princ)
