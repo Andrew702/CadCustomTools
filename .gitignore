@@ -1,0 +1,3 @@
+# Tool runtime debug logs (local to each user's ZWCAD session)
+**/logs/*.jsonl
+**/logs/*.log
