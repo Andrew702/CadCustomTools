@@ -153,6 +153,7 @@
   (setq dclPath (sh-write-temp-dcl))
   (if (null dclPath)
     (progn
+      (sh-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "temp_dcl_write_failed")))
       (princ "\nSelection History: Failed to create temporary DCL file.")
       nil
     )
@@ -161,6 +162,7 @@
       (if (or (null dclId) (< dclId 0))
         (progn
           (sh-cleanup-temp-dcl)
+          (sh-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "load_dialog_failed") (cons "path" dclPath)))
           (princ "\nSelection History: Failed to load dialog.")
           nil
         )
@@ -168,6 +170,7 @@
           (progn
             (unload_dialog dclId)
             (sh-cleanup-temp-dcl)
+            (sh-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "new_dialog_failed") (cons "path" dclPath)))
             (princ "\nSelection History: Failed to open dialog.")
             nil
           )
@@ -222,6 +225,14 @@
             (setq res (start_dialog))
             (unload_dialog dclId)
             (sh-cleanup-temp-dcl)
+
+            (sh-log-event "INFO" "DIALOG_CLOSE"
+              (list
+                (cons "rc"           res)
+                (cons "selected_idx" (if (= res 1) selectedIdx nil))
+                (cons "history_len"  (length *sh-history*))
+              )
+            )
 
             (if (and (= res 1) selectedIdx (cadr (nth (1- selectedIdx) rows)))
               selectedIdx
