@@ -173,30 +173,37 @@
   (cond
     ((= rt "")
      (set_tile "error" "Please enter a Room Type.")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "rtype") (cons "value" rt)))
      nil
     )
     ((not (rt-valid-uint-p snStr))
      (set_tile "error" "Start Number must be a non-negative integer.")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "startnum") (cons "value" snStr)))
      nil
     )
     ((or (not (rt-valid-number-p htStr)) (<= (atof htStr) 0.0))
      (set_tile "error" "Font Size must be a number greater than 0.")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "height") (cons "value" htStr)))
      nil
     )
     ((or (not (rt-valid-number-p fStr)) (<= (atof fStr) 0.0))
      (set_tile "error" "Scale Factor must be a number greater than 0 (e.g. 1e-6 or 1e-2).")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "factor") (cons "value" fStr)))
      nil
     )
     ((not (rt-valid-number-p bStr))
      (set_tile "error" "Area Bias must be a valid number (positive, 0, or negative).")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "bias") (cons "value" bStr)))
      nil
     )
     ((or (not (rt-valid-uint-p prStr)) (> (atoi prStr) 6))
      (set_tile "error" "Decimals must be an integer between 0 and 6.")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "prec") (cons "value" prStr)))
      nil
     )
     ((and chwEn (or (not (rt-valid-number-p tfStr)) (<= (atof tfStr) 0.0)))
      (set_tile "error" "Area Ton Factor must be a number greater than 0.")
+     (rt-log-event "WARN" "DIALOG_VALIDATION_FAIL" (list (cons "field" "tonfactor") (cons "value" tfStr)))
      nil
     )
     (T
@@ -246,6 +253,7 @@
   (setq dclPath (strcat *rt-root-dir* "src/rt_dialog.dcl"))
   (if (not (findfile dclPath))
     (progn
+      (rt-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "dcl_not_found") (cons "path" dclPath)))
       (princ (strcat "\nError: Dialog file not found at: " dclPath))
       0
     )
@@ -254,6 +262,7 @@
       (if (not (new_dialog "roomtag_dlg" dclId))
         (progn
           (if (> dclId 0) (unload_dialog dclId))
+          (rt-log-event "ERROR" "DIALOG_ERROR" (list (cons "reason" "new_dialog_failed") (cons "path" dclPath)))
           (princ "\nError: Could not initialize HVAC Room dialog.")
           0
         )
