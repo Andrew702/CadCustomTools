@@ -77,21 +77,33 @@
 )
 
 ;; Export tagged rooms to Excel-compatible CSV
-(defun rt-do-export (/ ss i e edata xd row rows hasChw hasPipe csvPath fp rowIdx line)
+(defun rt-do-export (/ ss scope entCount i e edata xd row rows skipped
+                       hasChw hasPipe totalArea totalGpm csvPath fp rowIdx line)
   (princ "\nSelect room tags to export (or press Enter to export ALL): ")
-  (setq ss (ssget '((0 . "MTEXT") (-3 ("ROOMTAG_DATA")))))
-  (if (null ss)
-    (setq ss (ssget "_X" '((0 . "MTEXT") (-3 ("ROOMTAG_DATA")))))
+  (setq ss    (ssget '((0 . "MTEXT") (-3 ("ROOMTAG_DATA"))))
+        scope "selected"
   )
   (if (null ss)
-    (princ "\nNo HVACROOM labels found in the drawing.")
+    (setq ss    (ssget "_X" '((0 . "MTEXT") (-3 ("ROOMTAG_DATA"))))
+          scope "all"
+    )
+  )
+  (if (null ss)
     (progn
-      (setq rows    nil
-            hasChw  (= *rt-chw-en* "1")
-            hasPipe (and (= *rt-chw-en* "1") (= *rt-pipe-en* "1"))
-            i       0
+      (rt-log-event "INFO" "EXPORT_EMPTY" (list (cons "scope" scope)))
+      (princ "\nNo HVACROOM labels found in the drawing.")
+    )
+    (progn
+      (setq entCount  (sslength ss)
+            rows      nil
+            skipped   0
+            totalArea 0.0
+            totalGpm  0.0
+            hasChw    (= *rt-chw-en* "1")
+            hasPipe   (and (= *rt-chw-en* "1") (= *rt-pipe-en* "1"))
+            i         0
       )
-      (repeat (sslength ss)
+      (repeat entCount
         (setq e     (ssname ss i)
               edata (entget e '("ROOMTAG_DATA"))
               xd    (cdr (assoc "ROOMTAG_DATA" (cdr (assoc -3 edata))))
@@ -99,10 +111,16 @@
         )
         (if row
           (progn
-            (if (nth 3 row) (setq hasChw T))
+            (setq totalArea (+ totalArea (float (nth 2 row))))
+            (if (nth 3 row)
+              (setq hasChw   T
+                    totalGpm (+ totalGpm (float (nth 4 row)))
+              )
+            )
             (if (nth 5 row) (setq hasPipe T hasChw T))
             (setq rows (cons row rows))
           )
+          (setq skipped (1+ skipped))
         )
         (setq i (1+ i))
       )
@@ -114,61 +132,92 @@
       (if csvPath
         (progn
           (setq fp (open csvPath "w"))
-          (cond
-            (hasPipe (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm),Pipe Size" fp))
-            (hasChw  (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm)" fp))
-            (T       (write-line "Room Name,Room Type,Area (m2)" fp))
-          )
-          (setq rowIdx 1)
-          (foreach r rows
-            (setq line
-              (strcat (rt-csv-escape (nth 0 r)) ","
-                      (rt-csv-escape (nth 1 r)) ","
-                      (rtos (nth 2 r) 2 *rt-prec*))
-            )
-            (if hasChw
-              (setq line
-                (strcat line ","
-                        (if (nth 3 r)
-                          (rtos (nth 4 r) 2 *rt-prec*)
-                          ""
-                        ))
+          (if (null fp)
+            (progn
+              (rt-log-event "ERROR" "EXPORT_ERROR"
+                (list (cons "reason" "open_failed") (cons "csv_path" csvPath))
               )
+              (princ (strcat "\nError: Could not open CSV file for writing: " csvPath))
             )
-            (if hasPipe
-              (setq line
-                (strcat line ","
-                        (if (nth 5 r)
-                          (rt-csv-escape (nth 6 r))
-                          ""
-                        ))
+            (progn
+              (cond
+                (hasPipe (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm),Pipe Size" fp))
+                (hasChw  (write-line "Room Name,Room Type,Area (m2),CHW Flow (gpm)" fp))
+                (T       (write-line "Room Name,Room Type,Area (m2)" fp))
               )
+              (setq rowIdx 1)
+              (foreach r rows
+                (setq line
+                  (strcat (rt-csv-escape (nth 0 r)) ","
+                          (rt-csv-escape (nth 1 r)) ","
+                          (rtos (nth 2 r) 2 *rt-prec*))
+                )
+                (if hasChw
+                  (setq line
+                    (strcat line ","
+                            (if (nth 3 r)
+                              (rtos (nth 4 r) 2 *rt-prec*)
+                              ""
+                            ))
+                  )
+                )
+                (if hasPipe
+                  (setq line
+                    (strcat line ","
+                            (if (nth 5 r)
+                              (rt-csv-escape (nth 6 r))
+                              ""
+                            ))
+                  )
+                )
+                (write-line line fp)
+                (setq rowIdx (1+ rowIdx))
+              )
+              (cond
+                (hasPipe
+                 (write-line
+                   (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) "),")
+                   fp
+                 )
+                )
+                (hasChw
+                 (write-line
+                   (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) ")")
+                   fp
+                 )
+                )
+                (T
+                 (write-line
+                   (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) ")")
+                   fp
+                 )
+                )
+              )
+              (close fp)
+              (rt-log-event "INFO" "EXPORT_COMPLETE"
+                (list
+                  (cons "scope"        scope)
+                  (cons "entity_count" entCount)
+                  (cons "parsed_rows"  (length rows))
+                  (cons "skipped_rows" skipped)
+                  (cons "has_chw"      (rt-log-bool hasChw))
+                  (cons "has_pipe"     (rt-log-bool hasPipe))
+                  (cons "total_area"   totalArea)
+                  (cons "total_gpm"    totalGpm)
+                  (cons "csv_path"     csvPath)
+                )
+              )
+              (princ (strcat "\nExported " (itoa (length rows)) " rooms to: " csvPath))
             )
-            (write-line line fp)
-            (setq rowIdx (1+ rowIdx))
           )
-          (cond
-            (hasPipe
-             (write-line
-               (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) "),")
-               fp
-             )
-            )
-            (hasChw
-             (write-line
-               (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),=SUM(D2:D" (itoa rowIdx) ")")
-               fp
-             )
-            )
-            (T
-             (write-line
-               (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) ")")
-               fp
-             )
-            )
+        )
+        (rt-log-event "INFO" "EXPORT_CANCELLED"
+          (list
+            (cons "scope"        scope)
+            (cons "entity_count" entCount)
+            (cons "parsed_rows"  (length rows))
+            (cons "skipped_rows" skipped)
           )
-          (close fp)
-          (princ (strcat "\nExported " (itoa (length rows)) " rooms to: " csvPath))
         )
       )
     )
