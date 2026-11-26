@@ -104,6 +104,9 @@
   (if (not *sh-loaded*)
     (princ "\nSelectionHistory could not start because required modules failed to load.")
     (progn
+      ;; Harvest any deferred in-command _P selection before displaying history
+      (sh-harvest-previous *sh-last-cmd*)
+
       ;; Snapshot any currently highlighted grips so Cancel restores them cleanly
       (setq prevSS (ssget "_I"))
       (if (and prevSS (> (sslength prevSS) 0))
@@ -152,7 +155,10 @@
   )
 
   (if *sh-loaded*
-    (sh-recall-slot idx nil)
+    (progn
+      (sh-harvest-previous *sh-last-cmd*)
+      (sh-recall-slot idx nil)
+    )
     (princ "\nSelectionHistory could not start because required modules failed to load.")
   )
   (princ)
@@ -183,7 +189,10 @@
     )
   )
   (if *sh-loaded*
-    (sh-recall-slot idx T)
+    (progn
+      (sh-harvest-previous *sh-last-cmd*)
+      (sh-recall-slot idx T)
+    )
     nil
   )
 )
