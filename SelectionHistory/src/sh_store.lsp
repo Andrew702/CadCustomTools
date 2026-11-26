@@ -11,6 +11,19 @@
 (if (not *sh-pending-pf*)   (setq *sh-pending-pf* nil))
 (if (not *sh-last-prev-key*)(setq *sh-last-prev-key* nil))
 (if (not *sh-suppress-key*) (setq *sh-suppress-key* nil))
+(if (not *sh-last-cmd*)     (setq *sh-last-cmd* nil))
+
+;; Retrieve the Previous selection set, falling back from "_P" to "P".
+(defun sh-get-previous-ss (/ ss)
+  (setq ss (vl-catch-all-apply 'ssget (list "_P")))
+  (if (or (vl-catch-all-error-p ss) (null ss))
+    (setq ss (vl-catch-all-apply 'ssget (list "P")))
+  )
+  (if (and ss (not (vl-catch-all-error-p ss)) (= (type ss) 'PICKSET) (> (sslength ss) 0))
+    ss
+    nil
+  )
+)
 
 ;; --------------------------------------------------------------------------
 ;; String & Entity Helpers
