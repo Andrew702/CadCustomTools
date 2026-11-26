@@ -180,7 +180,19 @@
             nil
           )
         )
-        nil
+        (progn
+          (if (> len *sh-max-entities*)
+            (sh-log-reactor-event "WARN" "SNAPSHOT_SKIPPED"
+              (list
+                (cons "reason" "over_max_entities")
+                (cons "len"    len)
+                (cons "max"    *sh-max-entities*)
+                (cons "source" (if source source "Selection"))
+              )
+            )
+          )
+          nil
+        )
       )
     )
     nil
@@ -201,19 +213,39 @@
 
 ;; Push a snapshot onto *sh-history* (max *sh-max-slots*), avoiding back-to-back
 ;; identical sets. Returns T if added, nil if skipped.
-(defun sh-push-snapshot (snap / newKey topKey)
+(defun sh-push-snapshot (snap / newKey topKey lenBefore)
   (if (null snap)
     nil
     (progn
-      (setq newKey (cdr (assoc 'key snap))
-            topKey (if *sh-history* (cdr (assoc 'key (car *sh-history*))) nil)
+      (setq newKey    (cdr (assoc 'key snap))
+            topKey    (if *sh-history* (cdr (assoc 'key (car *sh-history*))) nil)
+            lenBefore (length *sh-history*)
       )
       (if (and newKey (> (strlen newKey) 0) (not (equal newKey topKey)))
         (progn
           (setq *sh-history* (sh-take-n (cons snap *sh-history*) *sh-max-slots*))
+          (sh-log-reactor-event "INFO" "HISTORY_PUSH"
+            (list
+              (cons "source"             (cdr (assoc 'source snap)))
+              (cons "count"              (cdr (assoc 'count snap)))
+              (cons "summary"            (cdr (assoc 'summary snap)))
+              (cons "history_len_before" lenBefore)
+              (cons "history_len_after"  (length *sh-history*))
+              (cons "max_slots"          *sh-max-slots*)
+            )
+          )
           T
         )
-        nil
+        (progn
+          (sh-log-reactor-event "INFO" "HISTORY_PUSH_SKIP_DUP"
+            (list
+              (cons "source"      (cdr (assoc 'source snap)))
+              (cons "count"       (cdr (assoc 'count snap)))
+              (cons "history_len" lenBefore)
+            )
+          )
+          nil
+        )
       )
     )
   )
@@ -270,14 +302,38 @@
   (setq histLen (length *sh-history*))
   (cond
     ((or (not (numberp idx)) (< idx 1) (> idx *sh-max-slots*))
+     (sh-log-event "WARN" "RECALL_SLOT"
+       (list
+         (cons "idx"         idx)
+         (cons "for_command" (sh-log-bool forCommand))
+         (cons "outcome"     "invalid_idx")
+         (cons "history_len" histLen)
+       )
+     )
      (princ (strcat "\nSelection History: Slot must be between 1 and " (itoa *sh-max-slots*) "."))
      nil
     )
     ((= histLen 0)
+     (sh-log-event "INFO" "RECALL_SLOT"
+       (list
+         (cons "idx"         idx)
+         (cons "for_command" (sh-log-bool forCommand))
+         (cons "outcome"     "empty_history")
+         (cons "history_len" 0)
+       )
+     )
      (princ "\nSelection History: No selections recorded yet.")
      nil
     )
     ((> idx histLen)
+     (sh-log-event "INFO" "RECALL_SLOT"
+       (list
+         (cons "idx"         idx)
+         (cons "for_command" (sh-log-bool forCommand))
+         (cons "outcome"     "slot_empty")
+         (cons "history_len" histLen)
+       )
+     )
      (princ (strcat "\nSelection History: Slot #" (itoa idx) " is empty (only "
                     (itoa histLen) (if (= histLen 1) " slot" " slots") " recorded)."))
      nil
@@ -294,6 +350,19 @@
      )
      (if (= liveCnt 0)
        (progn
+         (sh-log-event "WARN" "RECALL_SLOT"
+           (list
+             (cons "idx"              idx)
+             (cons "for_command"      (sh-log-bool forCommand))
+             (cons "outcome"          "all_erased")
+             (cons "source"           src)
+             (cons "orig_count"       origCnt)
+             (cons "live_count"       0)
+             (cons "erased_count"     erasedCnt)
+             (cons "history_len"      histLen)
+             (cons "pickfirst_sysvar" (getvar "PICKFIRST"))
+           )
+         )
          (princ (strcat "\nSelection History #" (itoa idx)
                         ": All " (itoa origCnt) " objects have been erased."))
          nil
@@ -302,6 +371,19 @@
          ;; Guard against re-recording or reordering on recall
          (setq *sh-suppress-key* liveKey
                *sh-pending-pf*   nil
+         )
+         (sh-log-event "INFO" "RECALL_SLOT"
+           (list
+             (cons "idx"              idx)
+             (cons "for_command"      (sh-log-bool forCommand))
+             (cons "outcome"          "ok")
+             (cons "source"           src)
+             (cons "orig_count"       origCnt)
+             (cons "live_count"       liveCnt)
+             (cons "erased_count"     erasedCnt)
+             (cons "history_len"      histLen)
+             (cons "pickfirst_sysvar" (getvar "PICKFIRST"))
+           )
          )
          (if forCommand
            (progn
