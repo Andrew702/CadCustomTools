@@ -60,26 +60,42 @@
 )
 
 ;; Export tagged rooms to Excel-compatible CSV
-(defun ff-do-export (/ ss i e edata xd row rows csvPath fp rowIdx line)
+(defun ff-do-export (/ ss scope entCount i e edata xd row rows skipped
+                       totalArea totalSpr csvPath fp rowIdx line)
   (princ "\nSelect FireSprinkler tags to export (or press Enter to export ALL): ")
-  (setq ss (ssget '((0 . "MTEXT") (-3 ("FFSPRINKLER_DATA")))))
-  (if (null ss)
-    (setq ss (ssget "_X" '((0 . "MTEXT") (-3 ("FFSPRINKLER_DATA")))))
+  (setq ss    (ssget '((0 . "MTEXT") (-3 ("FFSPRINKLER_DATA"))))
+        scope "selected"
   )
   (if (null ss)
-    (princ "\nNo FFSPRINKLER labels found in the drawing.")
+    (setq ss    (ssget "_X" '((0 . "MTEXT") (-3 ("FFSPRINKLER_DATA"))))
+          scope "all"
+    )
+  )
+  (if (null ss)
     (progn
-      (setq rows nil
-            i    0
+      (ff-log-event "INFO" "EXPORT_EMPTY" (list (cons "scope" scope)))
+      (princ "\nNo FFSPRINKLER labels found in the drawing.")
+    )
+    (progn
+      (setq entCount  (sslength ss)
+            rows      nil
+            skipped   0
+            totalArea 0.0
+            totalSpr  0
+            i         0
       )
-      (repeat (sslength ss)
+      (repeat entCount
         (setq e     (ssname ss i)
               edata (entget e '("FFSPRINKLER_DATA"))
               xd    (cdr (assoc "FFSPRINKLER_DATA" (cdr (assoc -3 edata))))
               row   (ff-parse-xdata xd)
         )
         (if row
-          (setq rows (cons row rows))
+          (setq totalArea (+ totalArea (float (nth 2 row)))
+                totalSpr  (+ totalSpr (nth 5 row))
+                rows      (cons row rows)
+          )
+          (setq skipped (1+ skipped))
         )
         (setq i (1+ i))
       )
@@ -91,25 +107,54 @@
       (if csvPath
         (progn
           (setq fp (open csvPath "w"))
-          (write-line "Room Name,Room Type,Area (m2),Hazard,Sprinklers" fp)
-          (setq rowIdx 1)
-          (foreach r rows
-            (setq line
-              (strcat (ff-csv-escape (nth 0 r)) ","
-                      (ff-csv-escape (nth 1 r)) ","
-                      (rtos (nth 2 r) 2 *ff-prec*) ","
-                      (ff-csv-escape (nth 3 r)) ","
-                      (itoa (nth 5 r)))
+          (if (null fp)
+            (progn
+              (ff-log-event "ERROR" "EXPORT_ERROR"
+                (list (cons "reason" "open_failed") (cons "csv_path" csvPath))
+              )
+              (princ (strcat "\nError: Could not open CSV file for writing: " csvPath))
             )
-            (write-line line fp)
-            (setq rowIdx (1+ rowIdx))
+            (progn
+              (write-line "Room Name,Room Type,Area (m2),Hazard,Sprinklers" fp)
+              (setq rowIdx 1)
+              (foreach r rows
+                (setq line
+                  (strcat (ff-csv-escape (nth 0 r)) ","
+                          (ff-csv-escape (nth 1 r)) ","
+                          (rtos (nth 2 r) 2 *ff-prec*) ","
+                          (ff-csv-escape (nth 3 r)) ","
+                          (itoa (nth 5 r)))
+                )
+                (write-line line fp)
+                (setq rowIdx (1+ rowIdx))
+              )
+              (write-line
+                (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),,=SUM(E2:E" (itoa rowIdx) ")")
+                fp
+              )
+              (close fp)
+              (ff-log-event "INFO" "EXPORT_COMPLETE"
+                (list
+                  (cons "scope"            scope)
+                  (cons "entity_count"     entCount)
+                  (cons "parsed_rows"      (length rows))
+                  (cons "skipped_rows"     skipped)
+                  (cons "total_area"       totalArea)
+                  (cons "total_sprinklers" totalSpr)
+                  (cons "csv_path"         csvPath)
+                )
+              )
+              (princ (strcat "\nExported " (itoa (length rows)) " rooms to: " csvPath))
+            )
           )
-          (write-line
-            (strcat "TOTAL,,=SUM(C2:C" (itoa rowIdx) "),,=SUM(E2:E" (itoa rowIdx) ")")
-            fp
+        )
+        (ff-log-event "INFO" "EXPORT_CANCELLED"
+          (list
+            (cons "scope"        scope)
+            (cons "entity_count" entCount)
+            (cons "parsed_rows"  (length rows))
+            (cons "skipped_rows" skipped)
           )
-          (close fp)
-          (princ (strcat "\nExported " (itoa (length rows)) " rooms to: " csvPath))
         )
       )
     )
