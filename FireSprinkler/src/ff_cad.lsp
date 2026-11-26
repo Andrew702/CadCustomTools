@@ -188,7 +188,7 @@
   )
 )
 
-;; Read (list roomName rtype areaM2) from an existing MTEXT entity:
+;; Read (list roomName rtype areaM2 source) from an existing MTEXT entity:
 ;;   1. FFSPRINKLER_DATA XDATA
 ;;   2. ROOMTAG_DATA XDATA (from HvacRoom / RoomTag)
 ;;   3. Fallback: parse "Area: <num>" from MTEXT text string
@@ -201,13 +201,13 @@
           (>= (length xd) 3)
           (numberp (cdr (nth 2 xd)))
           (> (cdr (nth 2 xd)) 0.0))
-     (list (cdr (nth 0 xd)) (cdr (nth 1 xd)) (cdr (nth 2 xd)))
+     (list (cdr (nth 0 xd)) (cdr (nth 1 xd)) (cdr (nth 2 xd)) "FFSPRINKLER_DATA")
     )
     ((and (setq xd (cdr (assoc "ROOMTAG_DATA" xdList)))
           (>= (length xd) 3)
           (numberp (cdr (nth 2 xd)))
           (> (cdr (nth 2 xd)) 0.0))
-     (list (cdr (nth 0 xd)) (cdr (nth 1 xd)) (cdr (nth 2 xd)))
+     (list (cdr (nth 0 xd)) (cdr (nth 1 xd)) (cdr (nth 2 xd)) "ROOMTAG_DATA")
     )
     ((setq areaM2 (ff-extract-area-from-text txt))
      ;; Derive a best-effort room name from the first token before space / \P
@@ -223,7 +223,7 @@
                       (if (> spPos 0) (substr roomName 1 spPos) roomName)
                       roomName)
      )
-     (list roomName rtype areaM2)
+     (list roomName rtype areaM2 "TEXT_FALLBACK")
     )
     (T nil)
   )
@@ -255,7 +255,7 @@
 
 ;; Prompt user to select multiple existing MTEXT area tags and append
 ;; (or update in-place) "Sprinklers: <N>" + FFSPRINKLER_DATA XDATA.
-(defun ff-append-sprinklers-to-selection (/ ss i ent obj txt info areaM2
+(defun ff-append-sprinklers-to-selection (/ ss selCount i ent obj txt info areaM2
                                             sprCount newTxt updated skipped)
   (princ
     (strcat "\nSelect MTEXT area tags to append sprinklers ("
@@ -263,13 +263,25 @@
   )
   (setq ss (ssget '((0 . "MTEXT"))))
   (if (null ss)
-    (princ "\nNo MTEXT tags selected.")
     (progn
-      (setq i       0
-            updated 0
-            skipped 0
+      (ff-log-event "INFO" "APPEND_COMPLETE"
+        (list
+          (cons "selected_count" 0)
+          (cons "updated"        0)
+          (cons "skipped"        0)
+          (cons "hazard"         *ff-hazard*)
+          (cons "cov_area"       (float *ff-cov-area*))
+        )
       )
-      (repeat (sslength ss)
+      (princ "\nNo MTEXT tags selected.")
+    )
+    (progn
+      (setq selCount (sslength ss)
+            i        0
+            updated  0
+            skipped  0
+      )
+      (repeat selCount
         (setq ent  (ssname ss i)
               obj  (vlax-ename->vla-object ent)
               txt  (vl-catch-all-apply 'vla-get-TextString (list obj))
@@ -286,10 +298,39 @@
               ent (nth 0 info) (nth 1 info) areaM2 *ff-hazard* *ff-cov-area* sprCount
             )
             (setq updated (1+ updated))
+            (ff-log-event "INFO" "APPEND_ITEM"
+              (list
+                (cons "handle"     (ff-log-handle ent))
+                (cons "room_name"  (nth 0 info))
+                (cons "source"     (nth 3 info))
+                (cons "area_m2"    (float areaM2))
+                (cons "cov_area"   (float *ff-cov-area*))
+                (cons "sprinklers" sprCount)
+                (cons "updated"    'true)
+              )
+            )
           )
-          (setq skipped (1+ skipped))
+          (progn
+            (setq skipped (1+ skipped))
+            (ff-log-event "WARN" "APPEND_ITEM"
+              (list
+                (cons "handle"  (ff-log-handle ent))
+                (cons "source"  "NONE")
+                (cons "updated" 'false)
+              )
+            )
+          )
         )
         (setq i (1+ i))
+      )
+      (ff-log-event "INFO" "APPEND_COMPLETE"
+        (list
+          (cons "selected_count" selCount)
+          (cons "updated"        updated)
+          (cons "skipped"        skipped)
+          (cons "hazard"         *ff-hazard*)
+          (cons "cov_area"       (float *ff-cov-area*))
+        )
       )
       (princ
         (strcat "\nUpdated " (itoa updated) " tag(s) with sprinkler counts"
