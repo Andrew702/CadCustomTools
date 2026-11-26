@@ -27,10 +27,10 @@
   )
 )
 
-;; Return T if cmd is one of SelectionHistory's own recall commands.
+;; Return T if cmd is one of SelectionHistory's own recall/debug commands.
 (defun sh-own-command-p (cmd / norm)
   (setq norm (sh-normalize-cmd cmd))
-  (not (null (member norm '("SH" "SELHIST" "SH1" "SH2" "SH3" "SH4" "SH5"))))
+  (not (null (member norm '("SH" "SELHIST" "SH1" "SH2" "SH3" "SH4" "SH5" "SHDEBUG"))))
 )
 
 ;; Replace the 'source field in a snapshot alist.
@@ -47,9 +47,12 @@
 ;; --------------------------------------------------------------------------
 
 ;; Handle :vlr-pickfirstModified (outside-command implied selection changes).
-(defun sh-handle-pickfirst (/ ss snap key)
-  (setq ss (ssget "_I"))
-  (if (and ss (> (sslength ss) 0))
+(defun sh-handle-pickfirst (/ ss ssCount snap key action)
+  (setq ss      (ssget "_I")
+        ssCount (if ss (sslength ss) 0)
+        action  "noop"
+  )
+  (if (> ssCount 0)
     (progn
       (setq snap (sh-ss->snapshot ss "Pickfirst"))
       (if snap
@@ -57,14 +60,16 @@
           (setq key (cdr (assoc 'key snap)))
           (if (and *sh-suppress-key* (equal key *sh-suppress-key*))
             ;; Active grips are from a recall; keep history untouched.
-            nil
+            (setq action "suppress_match")
             (progn
               (setq *sh-suppress-key* nil
                     *sh-pending-pf*   snap
+                    action            "buffer"
               )
             )
           )
         )
+        (setq action "skip_snapshot")
       )
     )
     ;; Pickfirst became empty (Esc, deselect, or command start)
@@ -72,12 +77,27 @@
       (if *sh-pending-pf*
         (progn
           (sh-push-snapshot *sh-pending-pf*)
-          (setq *sh-pending-pf* nil)
+          (setq *sh-pending-pf* nil
+                action          "commit_pending"
+          )
         )
       )
       ;; Only clear recall suppression if no command is currently consuming it
       (if (and *sh-suppress-key* (= (getvar "CMDACTIVE") 0))
-        (setq *sh-suppress-key* nil)
+        (progn
+          (setq *sh-suppress-key* nil)
+          (if (= action "noop") (setq action "clear_suppress"))
+        )
+      )
+    )
+  )
+  (if (/= action "noop")
+    (sh-log-reactor-event "INFO" "REACTOR_PICKFIRST"
+      (list
+        (cons "ss_count"    ssCount)
+        (cons "action"      action)
+        (cons "cmdactive"   (getvar "CMDACTIVE"))
+        (cons "history_len" (length *sh-history*))
       )
     )
   )
@@ -85,9 +105,10 @@
 )
 
 ;; Handle :vlr-commandWillStart (commit pending pickfirst before command runs).
-(defun sh-handle-command-start (args / rawCmd cmdName src snap)
-  (setq rawCmd  (if (and args (= (type (car args)) 'STR)) (car args) "")
-        cmdName (sh-normalize-cmd rawCmd)
+(defun sh-handle-command-start (args / rawCmd cmdName src snap hadPending)
+  (setq rawCmd     (if (and args (= (type (car args)) 'STR)) (car args) "")
+        cmdName    (sh-normalize-cmd rawCmd)
+        hadPending (if *sh-pending-pf* T nil)
   )
   (if *sh-pending-pf*
     (progn
@@ -102,20 +123,34 @@
       (setq *sh-last-prev-key* (cdr (assoc 'key snap))
             *sh-pending-pf*    nil
       )
+      (sh-log-reactor-event "INFO" "REACTOR_CMD_START"
+        (list
+          (cons "cmd"         cmdName)
+          (cons "had_pending" 'true)
+          (cons "committed"   'true)
+          (cons "history_len" (length *sh-history*))
+        )
+      )
     )
   )
   nil
 )
 
 ;; Handle :vlr-commandEnded / :vlr-commandCancelled / :vlr-commandFailed.
-(defun sh-handle-command-end (args / rawCmd cmdName ss snap key curPf)
-  (setq rawCmd  (if (and args (= (type (car args)) 'STR)) (car args) "")
-        cmdName (sh-normalize-cmd rawCmd)
+(defun sh-handle-command-end (args / rawCmd cmdName isOwn ss prevCount snap key curPf action)
+  (setq rawCmd    (if (and args (= (type (car args)) 'STR)) (car args) "")
+        cmdName   (sh-normalize-cmd rawCmd)
+        isOwn     (sh-own-command-p cmdName)
+        prevCount 0
+        action    "skip_own_cmd"
   )
-  (if (not (sh-own-command-p cmdName))
+  (if (not isOwn)
     (progn
-      (setq ss (ssget "_P"))
-      (if (and ss (> (sslength ss) 0))
+      (setq ss        (ssget "_P")
+            prevCount (if ss (sslength ss) 0)
+            action    "empty_prev"
+      )
+      (if (> prevCount 0)
         (progn
           (setq snap (sh-ss->snapshot ss (if (> (strlen cmdName) 0) cmdName "Command")))
           (if snap
@@ -126,21 +161,26 @@
                 ((and *sh-suppress-key* (equal key *sh-suppress-key*))
                  (setq *sh-last-prev-key* key
                        *sh-suppress-key*  nil
+                       action             "skip_suppressed"
                  )
                 )
                 ;; Stale _P from an earlier command (e.g. ZOOM, PAN, LINE)
                 ((equal key *sh-last-prev-key*)
-                 nil
+                 (setq action "skip_stale_prev")
                 )
                 ;; Genuine new selection made inside the command
                 (T
-                 (sh-push-snapshot snap)
+                 (if (sh-push-snapshot snap)
+                   (setq action "pushed")
+                   (setq action "skip_duplicate")
+                 )
                  (setq *sh-last-prev-key* key
                        *sh-suppress-key*  nil
                  )
                 )
               )
             )
+            (setq action "skip_snapshot")
           )
         )
       )
@@ -153,6 +193,16 @@
           )
         )
       )
+      (if (not (member action '("empty_prev" "skip_stale_prev")))
+        (sh-log-reactor-event "INFO" "REACTOR_CMD_END"
+          (list
+            (cons "cmd"         cmdName)
+            (cons "prev_count"  prevCount)
+            (cons "action"      action)
+            (cons "history_len" (length *sh-history*))
+          )
+        )
+      )
     )
   )
   nil
@@ -162,18 +212,42 @@
 ;; Protected Reactor Callback Entry Points
 ;; --------------------------------------------------------------------------
 
-(defun sh-on-pickfirst-modified (reactor args)
-  (vl-catch-all-apply 'sh-handle-pickfirst nil)
+(defun sh-on-pickfirst-modified (reactor args / res)
+  (setq res (vl-catch-all-apply 'sh-handle-pickfirst nil))
+  (if (vl-catch-all-error-p res)
+    (sh-log-reactor-event "ERROR" "REACTOR_ERROR"
+      (list
+        (cons "callback" "pickfirstModified")
+        (cons "message"  (vl-catch-all-error-message res))
+      )
+    )
+  )
   nil
 )
 
-(defun sh-on-command-start (reactor args)
-  (vl-catch-all-apply 'sh-handle-command-start (list args))
+(defun sh-on-command-start (reactor args / res)
+  (setq res (vl-catch-all-apply 'sh-handle-command-start (list args)))
+  (if (vl-catch-all-error-p res)
+    (sh-log-reactor-event "ERROR" "REACTOR_ERROR"
+      (list
+        (cons "callback" "commandWillStart")
+        (cons "message"  (vl-catch-all-error-message res))
+      )
+    )
+  )
   nil
 )
 
-(defun sh-on-command-end (reactor args)
-  (vl-catch-all-apply 'sh-handle-command-end (list args))
+(defun sh-on-command-end (reactor args / res)
+  (setq res (vl-catch-all-apply 'sh-handle-command-end (list args)))
+  (if (vl-catch-all-error-p res)
+    (sh-log-reactor-event "ERROR" "REACTOR_ERROR"
+      (list
+        (cons "callback" "commandEnd")
+        (cons "message"  (vl-catch-all-error-message res))
+      )
+    )
+  )
   nil
 )
 
@@ -204,8 +278,9 @@
 )
 
 ;; Install (or cleanly reinstall) both SelectionHistory reactors.
-(defun sh-install-reactors (/ ss snap)
+(defun sh-install-reactors (/ ss snap seeded)
   (sh-remove-reactors)
+  (setq seeded nil)
 
   ;; Seed *sh-last-prev-key* on first load so pre-existing _P is not captured
   ;; by the first unrelated command (e.g. ZOOM/PAN).
@@ -216,7 +291,9 @@
         (progn
           (setq snap (sh-ss->snapshot ss "Previous"))
           (if snap
-            (setq *sh-last-prev-key* (cdr (assoc 'key snap)))
+            (setq *sh-last-prev-key* (cdr (assoc 'key snap))
+                  seeded             T
+            )
           )
         )
       )
@@ -241,6 +318,13 @@
         (:vlr-commandCancelled . sh-on-command-end)
         (:vlr-commandFailed    . sh-on-command-end)
       )
+    )
+  )
+  (sh-log-reactor-event "INFO" "REACTORS_INSTALLED"
+    (list
+      (cons "seeded_prev" (sh-log-bool seeded))
+      (cons "history_len" (length *sh-history*))
+      (cons "max_slots"   *sh-max-slots*)
     )
   )
   T
